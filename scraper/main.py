@@ -55,8 +55,9 @@ def run_scraper():
                 print(
                     f"✅ Saved [{car['marketplace_source']}]: {car.get('model_year')} {car.get('make')} - ${car.get('price')}"
                 )
+
     for dealer in DEALERS:
-        if dealer["platform"] == "dealer_com":
+        if dealer["platform"] == "dealeron":
             cars = dealeron.scrape(dealer["url"], None, None, None)
 
 
