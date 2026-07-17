@@ -1,6 +1,6 @@
 import os
 from supabase import create_client, Client
-from providers import craigslist, ebay
+from providers import craigslist, ebay, dealeron
 
 # 1. Setup
 url: str = os.environ.get("SUPABASE_URL")
@@ -10,6 +10,11 @@ if not url or not key:
     raise ValueError("Missing Supabase credentials!")
 
 supabase: Client = create_client(url, key)
+
+DEALERS = [
+    {"url": "https://www.stevenscreektoyota.com", "platform": "dealeron"},
+    {"url": "https://www.capitolhonda.com", "platform": "dealeron"},
+]
 
 
 def run_scraper():
@@ -50,6 +55,9 @@ def run_scraper():
                 print(
                     f"✅ Saved [{car['marketplace_source']}]: {car.get('model_year')} {car.get('make')} - ${car.get('price')}"
                 )
+    for dealer in DEALERS:
+        if dealer["platform"] == "dealer_com":
+            cars = dealeron.scrape(dealer["url"], None, None, None)
 
 
 if __name__ == "__main__":
