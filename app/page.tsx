@@ -135,10 +135,19 @@ export default function Home() {
                         key={car.id}
                         className="flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow"
                     >
-                        <div className="h-48 bg-slate-100 flex items-center justify-center border-b border-slate-100">
-                            <span className="text-slate-400 text-sm font-medium">
-                                NO IMAGE
-                            </span>
+                        {/* Image Section */}
+                        <div className="h-48 bg-slate-100 flex items-center justify-center border-b border-slate-100 overflow-hidden">
+                            {car.photos && car.photos.length > 0 ? (
+                                <img
+                                    src={car.photos[0]}
+                                    alt={car.model}
+                                    className="w-full h-full object-cover"
+                                />
+                            ) : (
+                                <span className="text-slate-400 text-sm font-medium">
+                                    NO IMAGE
+                                </span>
+                            )}
                         </div>
 
                         <div className="p-5 flex flex-col flex-1">

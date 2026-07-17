@@ -49,6 +49,11 @@ def scrape(make, model, max_price):
             if max_price and price > max_price:
                 continue
 
+            img_elem = item.find("img")
+            photo_url = (
+                img_elem["src"] if img_elem and img_elem.has_attr("src") else None
+            )
+
             results.append(
                 {
                     "marketplace_source": "craigslist",
@@ -57,8 +62,10 @@ def scrape(make, model, max_price):
                     "model": model.capitalize(),
                     "model_year": extract_year(title),
                     "price": price,
+                    "photos": [photo_url] if photo_url else [],  # Add this
                 }
             )
+
         except Exception:
             pass
 

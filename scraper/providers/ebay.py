@@ -58,6 +58,9 @@ def scrape(make, model, max_price):
             if max_price and price > max_price:
                 continue
 
+            img_elem = item.find("img", class_="s-item__image-img")
+            photo_url = img_elem.get("src") if img_elem else None
+
             results.append(
                 {
                     "marketplace_source": "ebay",
@@ -66,6 +69,7 @@ def scrape(make, model, max_price):
                     "model": model.capitalize(),
                     "model_year": extract_year(title),
                     "price": price,
+                    "photos": [photo_url] if photo_url else [],  # Add this
                 }
             )
         except Exception:
