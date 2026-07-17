@@ -1,103 +1,143 @@
-import requests
+from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
-import re
 import random
-import time
-
-def extract_year_make_model(title):
-    year_match = re.search(r"\b(199\d|20[0-2]\d)\b", title)
-    year = int(year_match.group(1)) if year_match else 2010
-
-    parts = title.replace(str(year), "").strip().split()
-    make = parts[0] if len(parts) > 0 else "Unknown"
-    model = parts[1] if len(parts) > 1 else "Unknown"
-
-    return year, make, model
 
 
-def scrape(base_url, make, model, max_price):
-    print(f"--- DealerOn: {base_url} ---")
+def extract_vehicle_data(v, base_url):
+    """
+    Extracts vehicle details from a BeautifulSoup element.
+    v: The BeautifulSoup element representing the vehicle card div.
+    """
+    try:
+        # Extract from data attributes
+        make = v.get("data-make", "Unknown")
+        model = v.get("data-model", "Unknown")
+        year = int(v.get("data-year", 0))
+
+        # Extract and clean price
+        price_str = v.get("data-dotagging-item-price", "0")
+        price = float(price_str)
+
+        # Extract Link (The specific structure from your HTML)
+        link_elem = v.find("a", class_="hero-carousel__item--viewvehicle")
+        link = link_elem.get("href", "#") if link_elem else "#"
+
+        # Extract Image
+        img_elem = v.find("img", class_="hero-carousel__background-image--grid")
+        photo_url = img_elem.get("src") if img_elem else None
+
+        # VIN (useful for preventing duplicates in the database)
+        vin = v.get("data-vin", "Unknown")
+
+        return {
+            "marketplace_source": "dealeron",
+            "original_url": link,
+            "vin": vin,
+            "make": make,
+            "model": model,
+            "model_year": year,
+            "price": price,
+            "photos": [photo_url] if photo_url else [],
+        }
+    except Exception as e:
+        print(f"Skipping vehicle due to parsing error: {e}")
+        return None
+
+
+def scrape(base_url, make=None, model=None, max_price=None):
+    print(f"--- DealerOn (Browser): {base_url} ---")
     results = []
 
-    # DealerOn standard inventory URL
-    url = f"{base_url}/searchused.aspx"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
 
-    try:
-        # Before making the request, sleep for a random time between 2 and 5 seconds
-        time.sleep(random.uniform(2, 5))
-        res = requests.get(url, headers=headers, timeout=10)
-        if res.status_code != 200:
+        # 1. Navigate to the page
+        page.goto(f"{base_url.rstrip('/')}/searchused.aspx", wait_until="networkidle")
+
+        # 2. PROBE: Find the container
+        possible_containers = [
+            ".srp-inventory",
+            ".inventory_list",
+            ".inventory-results",
+        ]
+        inventory_selector = None
+
+        for selector in possible_containers:
+            if page.query_selector(selector):
+                inventory_selector = selector
+                page.wait_for_selector(inventory_selector)
+                print(f"Detected inventory container: {inventory_selector}")
+                break
+
+        if not inventory_selector:
+            print(f"Inventory container not found at {base_url}. Aborting.")
+            browser.close()
             return results
 
-        soup = BeautifulSoup(res.text, "html.parser")
-        vehicles = soup.find_all("div", class_="vehicle-card")
+        # 2. Set 'Show: 96' dropdown
+        try:
+            page.click(".pagination-dropdown")
+            page.wait_for_timeout(500)
+            page.click("button[data-value='96']")
+            page.wait_for_timeout(3000)  # Wait for page to refresh
+        except:
+            print("Pagination dropdown not found, using default...")
 
-        for v in vehicles:
-            try:
-                # 1. Title/Year/Make/Model
-                title_elem = v.find("h2") or v.find("a", class_="url")
-                if not title_elem:
-                    continue
-                title = title_elem.text.strip()
-                year, car_make, car_model = extract_year_make_model(title)
+        # 3. PAGINATION LOOP
+        page_count = 0
+        max_pages = 50
+        while page_count < max_pages:
+            page_count += 1
+            print(f"--- Scraping Page {page_count} ---")
 
-                # 2. Filter by search criteria if provided
-                if make and make.lower() not in car_make.lower():
-                    continue
-                if model and model.lower() not in car_model.lower():
-                    continue
+            # Clear out potential overlays (cookie banners/chat widgets) that intercept clicks
+            page.evaluate("""
+                const overlays = document.querySelectorAll('#ca-consent-root, #podium-website-widget, .headerWrapper');
+                overlays.forEach(el => el.style.display = 'none');
+            """)
 
-                # 3. Price
-                price_elem = v.find("span", class_="internet-price") or v.find(
-                    "span", class_="price"
-                )
-                price_str = (
-                    price_elem.text.replace("$", "").replace(",", "")
-                    if price_elem
-                    else "0"
-                )
-                price = (
-                    float(price_str) if price_str.replace(".", "", 1).isdigit() else 0
-                )
+            # Parse the current page
+            html = page.content()
+            soup = BeautifulSoup(html, "html.parser")
 
-                if max_price and price > max_price:
-                    continue
+            vehicles = soup.find_all("div", class_="vehicle-card")
+            for v in vehicles:
+                car_data = extract_vehicle_data(v, base_url)
+                if car_data:
+                    # Apply filters
+                    if make and make.lower() not in car_data["make"].lower():
+                        continue
+                    if model and model.lower() not in car_data["model"].lower():
+                        continue
+                    if max_price and car_data["price"] > max_price:
+                        continue
 
-                # 4. Image
-                img_elem = v.find("img", class_="hero-carousel__image")
-                photo_url = (
-                    base_url + img_elem["src"]
-                    if img_elem and img_elem.has_attr("src")
-                    else None
-                )
+                    results.append(car_data)
 
-                # 5. Link
-                link_elem = v.find("a", class_="view-details") or v.find(
-                    "a", class_="url"
-                )
-                item_url = (
-                    base_url + link_elem["href"]
-                    if link_elem and link_elem.get("href", "").startswith("/")
-                    else link_elem["href"]
-                )
+            # Check for 'Next' button and handle it
+            next_button = page.query_selector(
+                ".pagination__item--next:not(.disabled) > a"
+            )
+            if next_button:
+                print("Clicking 'Next' page...")
+                try:
+                    # Scroll into view and force the click
+                    next_button.scroll_into_view_if_needed()
+                    next_button.click(force=True)
+                    # Wait for the network to idle after the click to ensure the new page loads
+                    page.wait_for_load_state("networkidle")
+                    # Extra buffer for JS hydration
+                    page.wait_for_timeout(2000)
+                except Exception as e:
+                    print(f"Could not click 'Next': {e}")
+                    break
+            else:
+                print("No more pages found.")
+                break
 
-                results.append(
-                    {
-                        "marketplace_source": "dealeron",
-                        "original_url": item_url,
-                        "make": car_make,
-                        "model": car_model,
-                        "model_year": year,
-                        "price": price,
-                        "photos": [photo_url] if photo_url else [],
-                    }
-                )
-            except Exception:
-                continue
-    except Exception as e:
-        print(f"Error scraping DealerOn site {base_url}: {e}")
+        # 4. Capture the fully expanded HTML page content after all scrolls finish
+        html = page.content()
+        browser.close()
 
     return results
