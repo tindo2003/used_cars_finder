@@ -1,14 +1,19 @@
 import argparse
 import os
 from supabase import create_client, Client
-from providers import craigslist, ebay, dealeron
+from providers import craigslist, ebay, dealeron, dealerinspire
 import time
 import random
 
 DEALERS = [
     {"url": "https://www.stevenscreektoyota.com", "platform": "dealeron"},
-    {"url": "https://www.capitolhonda.com", "platform": "dealeron"},
+    {"url": "https://www.capitolhonda.com", "platform": "dealerinspire"},
 ]
+
+DEALER_SCRAPERS = {
+    "dealeron": dealeron.scrape,
+    "dealerinspire": dealerinspire.scrape,
+}
 
 
 def get_supabase():
@@ -59,14 +64,18 @@ def run_scraper(dry_run=False):
     # --- 2. Scrape Dealerships (Independently of user searches) ---
     # Dealerships have their own inventory; we scrape their full used list
     for dealer in DEALERS:
-        if dealer["platform"] == "dealeron":
-            # Sleep before hitting a new dealership website
-            wait_time = random.uniform(5, 10)
-            print(f"Waiting {wait_time:.2f} seconds before next dealer...")
-            time.sleep(wait_time)
+        scraper_func = DEALER_SCRAPERS.get(dealer["platform"])
+        if not scraper_func:
+            print(f"Unknown platform '{dealer['platform']}' for {dealer['url']}, skipping.")
+            continue
 
-            cars_found = dealeron.scrape(dealer["url"], None, None, None)
-            save_cars_to_db(cars_found, dry_run, supabase)
+        # Sleep before hitting a new dealership website
+        wait_time = random.uniform(5, 10)
+        print(f"Waiting {wait_time:.2f} seconds before next dealer...")
+        time.sleep(wait_time)
+
+        cars_found = scraper_func(dealer["url"], None, None, None)
+        save_cars_to_db(cars_found, dry_run, supabase)
 
 
 def save_cars_to_db(cars, dry_run, supabase):  # Added supabase as an argument
