@@ -2,7 +2,9 @@
 
 Candidate franchise dealerships across the [PRD](./prd.md)'s target cities, compiled 2026-07-17 via web search. Scope was deliberately narrowed to franchise dealers in the PRD's named cities (not independent used lots, not a fully exhaustive list — the Bay Area has 150-200+ franchise dealers total).
 
-`scraper/main.py` only scrapes 2 dealers today (Steven's Creek Toyota on DealerOn, Capitol Honda on DealerInspire). This list is the pool to pull new entries from as coverage expands.
+Updated 2026-07-18: `scraper/main.py` now scrapes 10 dealers — the original 2 (Steven's Creek Toyota on DealerOn, Capitol Honda on DealerInspire) plus 8 more confirmed here and wired into `DEALERS` (2 more DealerOn: Fremont Chevrolet, Fremont Hyundai; 6 more DealerInspire: Capitol Ford, Capitol Chevrolet, Capitol Hyundai, Stevens Creek Hyundai, Sunnyvale Honda, Fremont CDJR). Each was verified with `python main.py --dry-run --max-pages 1` before being added. This list remains the pool to pull further entries from as coverage expands.
+
+While verifying, found `dealerinspire.py`'s `page.goto(..., wait_until="networkidle")` timed out on several of these sites (capitolford.com, capitolhyundaisj.com, stevenscreekhyundai.com, sunnyvalehonda.com, fremontcdjr.com) even though they loaded fine in a real browser — some DealerInspire sites run chat widgets/trackers that poll continuously and never let the network go idle. Changed to `wait_until="domcontentloaded"`, since the provider already has an explicit `wait_for_selector(".result-wrap")` right after to confirm real content loaded.
 
 A URL here is **not yet confirmed scrapeable** just by being listed — each site needs its platform identified and (as Capitol Honda showed) a bot-protection check before writing/reusing a provider for it. Update the "Platform" column as each dealer gets verified; strike through ones that turn out unscrapeable (closed, custom site, hard bot-wall, etc).
 
@@ -54,9 +56,9 @@ A URL here is **not yet confirmed scrapeable** just by being listed — each sit
 | Fremont Auto Mall (Audi/BMW/Honda/Lexus/Mercedes/Porsche hub) | thefremontautomall.com | dealereprocess (DEP) |
 | Fremont Toyota | fremonttoyota.com | dealereprocess (DEP) |
 | Acura of Fremont | acuraoffremont.com | dealersocket-gemini |
-| Fremont Chevrolet | chevroletoffremont.com | dealeron (confirmed) |
-| Fremont Hyundai (DGDG-owned) | fremonthyundai.com | dealeron (confirmed — uses .aspx pages like Stevens Creek Toyota) |
-| Fremont Chrysler Dodge Jeep Ram (DGDG-owned, technically Newark CA) | fremontcdjr.com | dealerinspire (confirmed) |
+| Fremont Chevrolet | chevroletoffremont.com | dealeron (confirmed, **live in DEALERS**) |
+| Fremont Hyundai (DGDG-owned) | fremonthyundai.com | dealeron (confirmed — uses .aspx pages like Stevens Creek Toyota, **live in DEALERS**) |
+| Fremont Chrysler Dodge Jeep Ram (DGDG-owned, technically Newark CA) | fremontcdjr.com | dealerinspire (confirmed, **live in DEALERS**) |
 
 ## Palo Alto
 | Dealer | URL | Platform |
@@ -85,15 +87,15 @@ A URL here is **not yet confirmed scrapeable** just by being listed — each sit
 | Capitol Honda | capitolhonda.com | dealerinspire (confirmed, already in DEALERS) |
 | Honda of Stevens Creek | hondaofstevenscreek.com | dealerdotcom |
 | Stevens Creek BMW | stevenscreekbmw.com | dealerdotcom |
-| Capitol Ford | capitolford.com | dealerinspire (confirmed — same DGDG/Capitol group as Capitol Honda) |
-| Capitol Chevrolet | capitolchevysj.com | dealerinspire (confirmed) |
-| Capitol Hyundai | **capitolhyundaisj.com** (corrected — capitolhyundai.com does not resolve) | dealerinspire (confirmed) |
+| Capitol Ford | capitolford.com | dealerinspire (confirmed — same DGDG/Capitol group as Capitol Honda, **live in DEALERS**) |
+| Capitol Chevrolet | capitolchevysj.com | dealerinspire (confirmed, **live in DEALERS**) |
+| Capitol Hyundai | **capitolhyundaisj.com** (corrected — capitolhyundai.com does not resolve) | dealerinspire (confirmed, **live in DEALERS**) |
 | ~~Capitol Genesis / Genesis of Stevens Creek~~ | genesisofstevenscreek.com redirects to stevenscreekhyundai.com | CLOSED — confirmed dead, not a separate scrapeable dealer |
 | Capitol Expressway Auto Mall (directory hub, not a single dealer) | capitolautomall.com | ? |
 | Del Grande Dealer Group (parent — many CA brands) | dgdg.com | likely just a directory/hub, not itself scrapeable |
-| Sunnyvale Honda (formerly listed as "Larry Hopkins Honda" — larryhopkinshonda.com redirects here) | **sunnyvalehonda.com** (corrected) | dealerinspire (confirmed) |
+| Sunnyvale Honda (formerly listed as "Larry Hopkins Honda" — larryhopkinshonda.com redirects here) | **sunnyvalehonda.com** (corrected) | dealerinspire (confirmed, **live in DEALERS**) |
 | Frontier Ford (Santa Clara) | (needs exact domain) | ? |
-| Stevens Creek Hyundai (Santa Clara) | stevenscreekhyundai.com | dealerinspire (confirmed) |
+| Stevens Creek Hyundai (Santa Clara) | stevenscreekhyundai.com | dealerinspire (confirmed, **live in DEALERS**) |
 
 ## Redwood City / San Mateo / San Carlos / Burlingame — Putnam Family Dealerships group
 | Dealer | URL | Platform |

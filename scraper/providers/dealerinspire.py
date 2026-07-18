@@ -65,7 +65,11 @@ def scrape(base_url, options: ScrapeOptions = None):
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
 
-        page.goto(f"{base_url.rstrip('/')}/used-vehicles/", wait_until="networkidle")
+        # domcontentloaded rather than networkidle: some DealerInspire sites
+        # run chat widgets/trackers that poll continuously and never let the
+        # network go idle, which was timing out page.goto entirely. The
+        # wait_for_selector below already confirms the real content loaded.
+        page.goto(f"{base_url.rstrip('/')}/used-vehicles/", wait_until="domcontentloaded")
 
         # Dismiss the cookie/privacy banner so it doesn't block scrolling/clicks
         try:
