@@ -1,7 +1,7 @@
 import argparse
 import os
 from supabase import create_client, Client
-from providers import craigslist, ebay, dealeron, dealerinspire
+from providers import craigslist, dealeron, dealerinspire
 from options import ScrapeOptions
 import time
 import random
@@ -57,8 +57,11 @@ def run_scraper(dry_run=False, max_pages=None):
         # Dummy data for dry run testing
         searches = [{"make": "Toyota", "model": "Camry", "max_price": 20000}]
 
-    # --- 1. Scrape Marketplaces (Craigslist/eBay) based on Saved Searches ---
-    active_marketplaces = [craigslist.scrape, ebay.scrape]
+    # --- 1. Scrape Marketplaces based on Saved Searches ---
+    # eBay is intentionally excluded: its robots.txt explicitly disallows
+    # this search pattern and prohibits automated access without
+    # permission. See research/scraping-etiquette.md.
+    active_marketplaces = [craigslist.scrape]
 
     for search in searches:
         make = search.get("make") or ""

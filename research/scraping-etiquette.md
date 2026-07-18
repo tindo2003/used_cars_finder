@@ -18,6 +18,6 @@ Audited 2026-07-18 to reduce IP-ban risk and confirm the scraper is behaving wel
 - `craigslist.py` / `ebay.py`: explicit handling for 403/429 responses (clear log message + clean return instead of silently doing nothing), and jittered the closing delay (2-4s random instead of a fixed 2s) so repeated calls across saved searches don't hit at a perfectly uniform, bot-like cadence.
 - DealerInspire and the existing 5-10s random delay between different dealer domains in `main.py` were already compliant — no change needed there.
 
-## Still open
+## Resolved
 
-eBay scraping remains active in `main.py`'s `active_marketplaces` despite the explicit robots.txt prohibition above. Needs a decision: drop it, gate it behind the official API, or something else — flagged to the user, not resolved unilaterally.
+Removed `ebay.scrape` from `main.py`'s `active_marketplaces` given the explicit robots.txt prohibition above (user decision, 2026-07-18). `scraper/providers/ebay.py` still exists — untouched — in case a future pass wires it up against eBay's official Browse/Finding API instead of HTML scraping.
