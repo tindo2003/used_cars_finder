@@ -119,7 +119,7 @@ def scrape(base_url, make=None, model=None, max_price=None):
             next_button = page.query_selector(
                 ".pagination__item--next:not(.disabled) > a"
             )
-            if next_button:
+            if next_button and page_count < max_pages:
                 print("Clicking 'Next' page...")
                 try:
                     # Scroll into view and force the click
