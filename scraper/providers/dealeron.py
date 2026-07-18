@@ -24,7 +24,13 @@ def extract_vehicle_data(v, base_url):
 
         # Extract Image
         img_elem = v.find("img", class_="hero-carousel__background-image--grid")
-        photo_url = img_elem.get("src") if img_elem else None
+        img_src = img_elem.get("src") if img_elem else None
+    
+        # If the src starts with /, prepend the base_url
+        if img_src and img_src.startswith("/"):
+            photo_url = f"{base_url.rstrip('/')}{img_src}"
+        else:
+            photo_url = img_src
 
         # VIN (useful for preventing duplicates in the database)
         vin = v.get("data-vin", "Unknown")
