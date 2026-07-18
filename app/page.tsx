@@ -87,6 +87,21 @@ export default function Home() {
             return;
         }
 
+        const hasNoFilters =
+            !make.trim() &&
+            !model.trim() &&
+            minYear === YEAR_MIN &&
+            maxMileage === MILEAGE_MAX &&
+            maxPrice === PRICE_MAX;
+
+        if (hasNoFilters) {
+            const proceed = window.confirm(
+                "You haven't set any filters, so this search won't be very targeted. " +
+                    "We'll still email you the 10 lowest-priced listings overall instead of every listing. Save anyway?"
+            );
+            if (!proceed) return;
+        }
+
         setSaveStatus("loading");
 
         const { error } = await supabase.from("saved_searches").insert({

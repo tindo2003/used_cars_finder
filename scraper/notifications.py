@@ -6,6 +6,25 @@ from db import DbClient
 
 RESEND_API_URL = "https://api.resend.com/emails"
 
+# A saved search with no filters at all would otherwise match every
+# active listing. Instead of notifying for all of them, only the
+# cheapest N are considered "the top deals" for an unfiltered search.
+TOP_UNFILTERED_DEALS = 10
+
+
+def has_no_filters(search):
+    return not any(
+        [
+            search.get("make"),
+            search.get("model"),
+            search.get("max_price") is not None,
+            search.get("min_year") is not None,
+            search.get("max_mileage") is not None,
+            search.get("transmission"),
+            search.get("seller_type"),
+        ]
+    )
+
 
 def matches(listing, search):
     """
@@ -104,7 +123,16 @@ def notify_matches(supabase, send_email_fn=None):
 
     sent = 0
     for search in searches:
-        for listing in listings:
+        if has_no_filters(search):
+            # No way to judge "matches" without any criteria -- fall back
+            # to the cheapest N listings overall as a crude deal signal.
+            candidates = sorted(
+                listings, key=lambda l: l.get("price") if l.get("price") is not None else float("inf")
+            )[:TOP_UNFILTERED_DEALS]
+        else:
+            candidates = listings
+
+        for listing in candidates:
             key = (search["id"], listing["id"])
             if key in already_notified:
                 continue

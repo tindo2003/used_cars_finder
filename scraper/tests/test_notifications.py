@@ -1,4 +1,4 @@
-from notifications import matches, notify_matches
+from notifications import TOP_UNFILTERED_DEALS, has_no_filters, matches, notify_matches
 from tests.fakes import FakeSupabase
 
 
@@ -183,3 +183,58 @@ def test_notify_matches_notifies_multiple_matching_searches_for_one_listing():
 
     assert count == 2
     assert set(sent_emails) == {"a@example.com", "b@example.com"}
+
+
+# --- has_no_filters() ---
+
+
+def test_has_no_filters_true_when_every_field_is_unset():
+    assert has_no_filters(make_search()) is True
+
+
+def test_has_no_filters_false_when_any_field_is_set():
+    assert has_no_filters(make_search(make="Toyota")) is False
+    assert has_no_filters(make_search(max_price=20000)) is False
+    assert has_no_filters(make_search(min_year=2018)) is False
+    assert has_no_filters(make_search(max_mileage=50000)) is False
+    assert has_no_filters(make_search(transmission="Automatic")) is False
+    assert has_no_filters(make_search(seller_type="dealer")) is False
+
+
+# --- notify_matches() with an unfiltered search ---
+
+
+def test_notify_matches_limits_unfiltered_search_to_cheapest_top_n():
+    listings = [
+        make_listing(id=f"listing-{i}", price=10000 + i * 1000) for i in range(TOP_UNFILTERED_DEALS + 5)
+    ]
+    supabase = FakeSupabase(
+        initial_data={
+            "saved_searches": [make_search()],  # no filters set
+            "listings": listings,
+        }
+    )
+    sent_emails = []
+
+    count = notify_matches(supabase, send_email_fn=lambda email, listing: sent_emails.append(listing))
+
+    assert count == TOP_UNFILTERED_DEALS
+    notified_ids = {listing["id"] for listing in sent_emails}
+    cheapest_ids = {f"listing-{i}" for i in range(TOP_UNFILTERED_DEALS)}
+    assert notified_ids == cheapest_ids
+
+
+def test_notify_matches_does_not_limit_a_filtered_search_even_with_many_listings():
+    listings = [
+        make_listing(id=f"listing-{i}", price=10000 + i * 1000) for i in range(TOP_UNFILTERED_DEALS + 5)
+    ]
+    supabase = FakeSupabase(
+        initial_data={
+            "saved_searches": [make_search(max_price=100000)],  # a real filter, just a loose one
+            "listings": listings,
+        }
+    )
+
+    count = notify_matches(supabase, send_email_fn=lambda email, listing: None)
+
+    assert count == len(listings)
