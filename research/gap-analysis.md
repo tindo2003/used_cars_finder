@@ -14,7 +14,10 @@ Snapshot date: 2026-07-17. Compares [prd.md](./prd.md) against the codebase as i
 - **Filters are thin** — PRD wants min year, max mileage, transmission, seller type, radius; only make/model/max price exist today (PRD 4.2).
 - **No listing detail page** — PRD wants a dedicated page per listing with full description/specs (PRD 3.4); currently cards-only, straight out to the source.
 - **Data sources incomplete** — PRD names Facebook Marketplace, Cars.com, Autotrader, dealership sites; scraper covers Craigslist, eBay (not in PRD's source list), and DealerOn/DealerInspire dealers only.
-- **Geo/radius unconfirmed** — PRD's listing data model (5.4) calls for coordinates; hasn't been verified that the `listings` table actually has lat/long columns.
+- **Most listing fields are never populated** — see [data-quality-findings.md](./data-quality-findings.md). `mileage`, `seller_type`, `transmission`, `fuel_type`, `description`, `location`, `city`, `posted_at`, `trim` are empty on every row from every source, so PRD filters beyond make/model/price (4.2) can't work yet even though the schema supports them.
+
+## Resolved since 2026-07-17
+- ~~Geo/radius unconfirmed~~ — confirmed 2026-07-18: the `listings` table already has PostGIS enabled (`geography_columns`, `spatial_ref_sys` present) and `location`/`saved_searches.target_location` are geography-typed columns. The DB is ready for radius search; no scraper populates `location` yet (see above).
 
 ## Timeline read
 Project is roughly at the end of the PRD's "Weeks 2–3" (listing aggregation), with "Week 4" (search UI) partially started. "Week 6" (saved searches & notifications) is the biggest structural piece still fully missing.

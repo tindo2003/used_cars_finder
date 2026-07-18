@@ -33,7 +33,7 @@ def extract_vehicle_data(v, base_url):
             photo_url = img_src
 
         # VIN (useful for preventing duplicates in the database)
-        vin = v.get("data-vin", "Unknown")
+        vin = v.get("data-vin") or None
 
         return {
             "marketplace_source": "dealeron",

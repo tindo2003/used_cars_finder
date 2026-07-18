@@ -24,7 +24,7 @@ def extract_vehicle_data(card, base_url):
         return {
             "marketplace_source": "dealerinspire",
             "original_url": link,
-            "vin": data.get("vin", "Unknown"),
+            "vin": data.get("vin") or None,
             "make": data.get("make", "Unknown"),
             "model": data.get("model", "Unknown"),
             "model_year": int(data.get("year") or 0),

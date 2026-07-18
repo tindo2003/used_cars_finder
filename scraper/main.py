@@ -86,7 +86,7 @@ def save_cars_to_db(cars, dry_run, supabase):  # Added supabase as an argument
             )
         else:
             car["status"] = "active"
-            supabase.table("listings").upsert(car, on_conflict="vin").execute()
+            supabase.table("listings").upsert(car, on_conflict="original_url").execute()
             print(
                 f"✅ Saved: {car.get('model_year')} {car.get('make')} - ${car.get('price')}"
             )
