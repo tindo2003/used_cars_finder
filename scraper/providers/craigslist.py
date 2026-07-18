@@ -3,6 +3,8 @@ import requests
 from bs4 import BeautifulSoup
 import time
 
+from options import ScrapeOptions
+
 headers = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
     "Accept-Language": "en-US,en;q=0.9",
@@ -14,7 +16,11 @@ def extract_year(title):
     return int(match.group(1)) if match else 2010
 
 
-def scrape(make, model, max_price):
+def scrape(options: ScrapeOptions):
+    make = options.make or ""
+    model = options.model or ""
+    max_price = options.max_price
+
     print(f"--- Craigslist: {make.capitalize()} {model.capitalize()} ---")
     results = []
     query_parts = [part for part in [make, model] if part]

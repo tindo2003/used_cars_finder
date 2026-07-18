@@ -2,6 +2,7 @@ import argparse
 import os
 from supabase import create_client, Client
 from providers import craigslist, ebay, dealeron, dealerinspire
+from options import ScrapeOptions
 import time
 import random
 
@@ -50,15 +51,15 @@ def run_scraper(dry_run=False, max_pages=None):
     for search in searches:
         make = search.get("make") or ""
         model = search.get("model") or ""
-        max_price = search.get("max_price")
 
         if not make and not model:
             continue
 
         print(f"\nEvaluating target: {make.capitalize()} {model.capitalize()}")
 
+        options = ScrapeOptions(make=make, model=model, max_price=search.get("max_price"))
         for provider_func in active_marketplaces:
-            cars_found = provider_func(make, model, max_price)
+            cars_found = provider_func(options)
             save_cars_to_db(cars_found, dry_run, supabase)
 
     # --- 2. Scrape Dealerships (Independently of user searches) ---
@@ -74,8 +75,7 @@ def run_scraper(dry_run=False, max_pages=None):
         print(f"Waiting {wait_time:.2f} seconds before next dealer...")
         time.sleep(wait_time)
 
-        kwargs = {"max_pages": max_pages} if max_pages else {}
-        cars_found = scraper_func(dealer["url"], None, None, None, **kwargs)
+        cars_found = scraper_func(dealer["url"], ScrapeOptions(max_pages=max_pages))
         save_cars_to_db(cars_found, dry_run, supabase)
 
 

@@ -3,6 +3,8 @@ from bs4 import BeautifulSoup
 import base64
 import random
 
+from options import ScrapeOptions
+
 
 def extract_price(v):
     """
@@ -76,7 +78,10 @@ def extract_vehicle_data(v, base_url):
         return None
 
 
-def scrape(base_url, make=None, model=None, max_price=None, max_pages=300):
+def scrape(base_url, options: ScrapeOptions = None):
+    options = options or ScrapeOptions()
+    max_pages = options.max_pages or 300
+
     print(f"--- DealerOn (Browser): {base_url} ---")
     results = []
 
@@ -137,11 +142,11 @@ def scrape(base_url, make=None, model=None, max_price=None, max_pages=300):
                 car_data = extract_vehicle_data(v, base_url)
                 if car_data:
                     # Apply filters
-                    if make and make.lower() not in car_data["make"].lower():
+                    if options.make and options.make.lower() not in car_data["make"].lower():
                         continue
-                    if model and model.lower() not in car_data["model"].lower():
+                    if options.model and options.model.lower() not in car_data["model"].lower():
                         continue
-                    if max_price and car_data["price"] > max_price:
+                    if options.max_price and car_data["price"] > options.max_price:
                         continue
 
                     results.append(car_data)

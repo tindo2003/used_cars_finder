@@ -19,6 +19,8 @@ Fix applied: `dealeron.py`'s `extract_price` now decodes `data-pricelib` and rea
 
 Also added a `max_pages` parameter to both `dealeron.scrape()` and `dealerinspire.scrape()` (plumbed through `main.py`'s new `--max-pages` CLI flag), so testing a fix no longer requires paginating through the full ~370-vehicle inventory — `python main.py --dry-run --max-pages 1` checks just the first page.
 
+**Provider signatures refactored to a shared `ScrapeOptions` dataclass.** Every `scrape()` call was growing its own ad-hoc positional argument list (`make, model, max_price, max_pages, ...`), which meant touching every provider's signature and every call site each time a new filter/option was needed. `scraper/options.py` now defines `ScrapeOptions(make, model, max_price, max_pages)`; all four providers (`dealeron`, `dealerinspire`, `craigslist`, `ebay`) take a single `options: ScrapeOptions` argument instead. Future flags (mileage, transmission, radius, etc.) just add a field to `ScrapeOptions` with a default — no provider signatures need to change.
+
 ## Still open
 
 **No eBay listings ever saved.** `ebay.py` runs in `scraper/main.py`'s marketplace loop but produced zero rows in this export. Could be working-but-finding-nothing, or silently failing (e.g., eBay's markup no longer matches the `s-item__wrapper` selectors, or requests are being blocked). Not yet investigated.

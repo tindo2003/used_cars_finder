@@ -1,6 +1,8 @@
 from playwright.sync_api import sync_playwright
 import json
 
+from options import ScrapeOptions
+
 
 def extract_vehicle_data(card, base_url):
     """
@@ -36,7 +38,10 @@ def extract_vehicle_data(card, base_url):
         return None
 
 
-def scrape(base_url, make=None, model=None, max_price=None, max_pages=50):
+def scrape(base_url, options: ScrapeOptions = None):
+    options = options or ScrapeOptions()
+    max_pages = options.max_pages or 50
+
     print(f"--- DealerInspire (Browser): {base_url} ---")
     results = []
 
@@ -86,11 +91,11 @@ def scrape(base_url, make=None, model=None, max_price=None, max_pages=50):
             for card in cards:
                 car_data = extract_vehicle_data(card, base_url)
                 if car_data:
-                    if make and make.lower() not in car_data["make"].lower():
+                    if options.make and options.make.lower() not in car_data["make"].lower():
                         continue
-                    if model and model.lower() not in car_data["model"].lower():
+                    if options.model and options.model.lower() not in car_data["model"].lower():
                         continue
-                    if max_price and car_data["price"] > max_price:
+                    if options.max_price and car_data["price"] > options.max_price:
                         continue
                     results.append(car_data)
 
