@@ -14,3 +14,4 @@ class ScrapeOptions:
     model: Optional[str] = None
     max_price: Optional[float] = None
     max_pages: Optional[int] = None
+    city: Optional[str] = None

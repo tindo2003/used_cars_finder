@@ -4,11 +4,16 @@ import json
 from options import ScrapeOptions
 
 
-def extract_vehicle_data(card, base_url):
+def extract_vehicle_data(card, base_url, city=None):
     """
     Extracts vehicle details from a Playwright element handle for a
     DealerInspire ".result-wrap" card. Unlike DealerOn, all vehicle fields
     are packed into a single "data-vehicle" JSON attribute.
+
+    Note: mileage and transmission are not exposed on this card in any form
+    (not in data-vehicle, not in the rendered HTML) — DealerInspire only
+    shows those on each vehicle's own detail page, which we don't visit
+    here to avoid multiplying scrape time per vehicle.
     """
     try:
         data = json.loads(card.get_attribute("data-vehicle") or "{}")
@@ -29,8 +34,13 @@ def extract_vehicle_data(card, base_url):
             "vin": data.get("vin") or None,
             "make": data.get("make", "Unknown"),
             "model": data.get("model", "Unknown"),
+            "trim": data.get("trim") or None,
             "model_year": int(data.get("year") or 0),
             "price": float(data.get("price") or 0),
+            "seller_type": "dealer",
+            "fuel_type": data.get("fueltype") or None,
+            "city": city,
+            "posted_at": data.get("date_in_stock") or None,
             "photos": [photo_url] if photo_url else [],
         }
     except Exception as e:
@@ -93,7 +103,7 @@ def scrape(base_url, options: ScrapeOptions = None):
 
             cards = page.query_selector_all(".result-wrap")
             for card in cards:
-                car_data = extract_vehicle_data(card, base_url)
+                car_data = extract_vehicle_data(card, base_url, city=options.city)
                 if car_data:
                     if options.make and options.make.lower() not in car_data["make"].lower():
                         continue

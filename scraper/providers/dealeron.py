@@ -33,7 +33,23 @@ def extract_price(v):
     return float(v.get("data-dotagging-item-price", "0"))
 
 
-def extract_vehicle_data(v, base_url):
+def extract_mileage(v):
+    odometer = v.get("data-odometer")
+    if odometer and odometer.isdigit():
+        return int(odometer)
+    return None
+
+
+def extract_posted_at(v):
+    # data-dotagging-item-inventory-date is "YYYY/MM/DD"; Postgres accepts
+    # "YYYY-MM-DD" as a valid timestamp/date literal directly.
+    inventory_date = v.get("data-dotagging-item-inventory-date")
+    if inventory_date:
+        return inventory_date.replace("/", "-")
+    return None
+
+
+def extract_vehicle_data(v, base_url, city=None):
     """
     Extracts vehicle details from a BeautifulSoup element.
     v: The BeautifulSoup element representing the vehicle card div.
@@ -69,8 +85,15 @@ def extract_vehicle_data(v, base_url):
             "vin": vin,
             "make": make,
             "model": model,
+            "trim": v.get("data-trim") or None,
             "model_year": year,
             "price": price,
+            "mileage": extract_mileage(v),
+            "seller_type": "dealer",
+            "transmission": v.get("data-trans") or None,
+            "fuel_type": v.get("data-fueltype") or None,
+            "city": city,
+            "posted_at": extract_posted_at(v),
             "photos": [photo_url] if photo_url else [],
         }
     except Exception as e:
@@ -139,7 +162,7 @@ def scrape(base_url, options: ScrapeOptions = None):
 
             vehicles = soup.find_all("div", class_="vehicle-card")
             for v in vehicles:
-                car_data = extract_vehicle_data(v, base_url)
+                car_data = extract_vehicle_data(v, base_url, city=options.city)
                 if car_data:
                     # Apply filters
                     if options.make and options.make.lower() not in car_data["make"].lower():

@@ -8,19 +8,19 @@ import random
 
 DEALERS = [
     # San Jose
-    {"url": "https://www.stevenscreektoyota.com", "platform": "dealeron"},
-    {"url": "https://www.capitolhonda.com", "platform": "dealerinspire"},
-    {"url": "https://www.capitolford.com", "platform": "dealerinspire"},
-    {"url": "https://www.capitolchevysj.com", "platform": "dealerinspire"},
-    {"url": "https://www.capitolhyundaisj.com", "platform": "dealerinspire"},
+    {"url": "https://www.stevenscreektoyota.com", "platform": "dealeron", "city": "San Jose"},
+    {"url": "https://www.capitolhonda.com", "platform": "dealerinspire", "city": "San Jose"},
+    {"url": "https://www.capitolford.com", "platform": "dealerinspire", "city": "San Jose"},
+    {"url": "https://www.capitolchevysj.com", "platform": "dealerinspire", "city": "San Jose"},
+    {"url": "https://www.capitolhyundaisj.com", "platform": "dealerinspire", "city": "San Jose"},
     # Santa Clara
-    {"url": "https://www.stevenscreekhyundai.com", "platform": "dealerinspire"},
+    {"url": "https://www.stevenscreekhyundai.com", "platform": "dealerinspire", "city": "Santa Clara"},
     # Sunnyvale
-    {"url": "https://www.sunnyvalehonda.com", "platform": "dealerinspire"},
+    {"url": "https://www.sunnyvalehonda.com", "platform": "dealerinspire", "city": "Sunnyvale"},
     # Fremont / Newark
-    {"url": "https://www.chevroletoffremont.com", "platform": "dealeron"},
-    {"url": "https://www.fremonthyundai.com", "platform": "dealeron"},
-    {"url": "https://www.fremontcdjr.com", "platform": "dealerinspire"},
+    {"url": "https://www.chevroletoffremont.com", "platform": "dealeron", "city": "Fremont"},
+    {"url": "https://www.fremonthyundai.com", "platform": "dealeron", "city": "Fremont"},
+    {"url": "https://www.fremontcdjr.com", "platform": "dealerinspire", "city": "Newark"},
 ]
 
 DEALER_SCRAPERS = {
@@ -87,7 +87,8 @@ def run_scraper(dry_run=False, max_pages=None):
         print(f"Waiting {wait_time:.2f} seconds before next dealer...")
         time.sleep(wait_time)
 
-        cars_found = scraper_func(dealer["url"], ScrapeOptions(max_pages=max_pages))
+        options = ScrapeOptions(max_pages=max_pages, city=dealer.get("city"))
+        cars_found = scraper_func(dealer["url"], options)
         save_cars_to_db(cars_found, dry_run, supabase)
 
 

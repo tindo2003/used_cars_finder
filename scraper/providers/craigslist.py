@@ -60,6 +60,9 @@ def scrape(options: ScrapeOptions):
                 img_elem["src"] if img_elem and img_elem.has_attr("src") else None
             )
 
+            location_elem = item.find("div", class_="location")
+            city = location_elem.text.strip() if location_elem else None
+
             results.append(
                 {
                     "marketplace_source": "craigslist",
@@ -68,6 +71,7 @@ def scrape(options: ScrapeOptions):
                     "model": model.capitalize(),
                     "model_year": extract_year(title),
                     "price": price,
+                    "city": city,
                     "photos": [photo_url] if photo_url else [],  # Add this
                 }
             )
