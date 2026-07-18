@@ -387,7 +387,6 @@ export default function Home() {
                         />
                         <input
                             type="email"
-                            required
                             placeholder="Enter your email"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}

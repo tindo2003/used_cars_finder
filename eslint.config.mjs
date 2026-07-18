@@ -13,6 +13,16 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    // Test files and test tooling config mock modules loosely on purpose;
+    // relax rules aimed at production component/image code.
+    files: ["**/*.test.ts", "**/*.test.tsx", "vitest.config.ts", "vitest.setup.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+      "@next/next/no-img-element": "off",
+      "jsx-a11y/alt-text": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;
