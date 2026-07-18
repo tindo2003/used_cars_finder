@@ -13,9 +13,13 @@ Fix applied:
 - `dealeron.py` / `dealerinspire.py`: missing VIN now stored as `None` instead of `"Unknown"`.
 - `migrations/001_dedupe_listings_and_fix_conflict_key.sql`: one-time cleanup of existing duplicates + adds the unique constraint on `original_url` the new upsert relies on. **Needs to be run manually in the Supabase SQL editor** — not applied automatically.
 
-## Still open
+**Bad price data from dealeron.** Two vehicles from Stevens Creek Toyota showed different wrong prices on every scrape: the Corolla Hatchback SE (VIN JTND4MBE1R3228151) went $289 → $23,505 → $66,675 across three runs; the Tundra Platinum (VIN 5TFNA5DB0SX249078) went $2,624 → $66,675 → similar drift. Root cause: `dealeron.py` read price from `data-dotagging-item-price`, a third-party analytics tag that is simply unreliable and drifts between page loads — it is not the site's actual displayed price. The real price lives in `data-pricelib`, a base64-encoded string (`"Selling Price:25888.0;...;calc_INTERNET PRICE:25973.0;..."`) that decodes to the same "Internet Price" shown on the vehicle's own detail page. Confirmed live: Corolla's real price is $25,973, Tundra's is $57,973.
 
-**Bad price data from dealeron.** Two vehicles from Stevens Creek Toyota had absurd prices: a 2024 Corolla Hatchback SE at $289, a 2025 Tundra Platinum at $2,624 (both ~100x too low). `dealeron.py` reads price straight from the site's `data-dotagging-item-price` attribute; likely picking up a monthly-payment or incentive figure instead of the actual price on certain promoted vehicles. Not yet root-caused — needs a live look at those specific listing pages.
+Fix applied: `dealeron.py`'s `extract_price` now decodes `data-pricelib` and reads `calc_INTERNET PRICE` (falling back to `Selling Price`, then to the old analytics tag only if `data-pricelib` is missing/unparseable). Verified against the live site with `max_pages=1` — both vehicles now return their correct price.
+
+Also added a `max_pages` parameter to both `dealeron.scrape()` and `dealerinspire.scrape()` (plumbed through `main.py`'s new `--max-pages` CLI flag), so testing a fix no longer requires paginating through the full ~370-vehicle inventory — `python main.py --dry-run --max-pages 1` checks just the first page.
+
+## Still open
 
 **No eBay listings ever saved.** `ebay.py` runs in `scraper/main.py`'s marketplace loop but produced zero rows in this export. Could be working-but-finding-nothing, or silently failing (e.g., eBay's markup no longer matches the `s-item__wrapper` selectors, or requests are being blocked). Not yet investigated.
 

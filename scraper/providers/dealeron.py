@@ -1,6 +1,34 @@
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
+import base64
 import random
+
+
+def extract_price(v):
+    """
+    data-dotagging-item-price is a third-party analytics tag and is
+    unreliable (observed wildly wrong values). The real price lives in
+    data-pricelib, a base64-encoded "key:value;key:value" string, e.g.
+    "Selling Price:25888.0;...;calc_INTERNET PRICE:25973.0;...". Prefer
+    that field's Internet Price, which matches the site's displayed price.
+    """
+    pricelib = v.get("data-pricelib")
+    if pricelib:
+        try:
+            decoded = base64.b64decode(pricelib).decode("utf-8")
+            fields = dict(
+                part.partition(":")[::2] for part in decoded.split(";") if ":" in part
+            )
+            internet_price = fields.get("calc_INTERNET PRICE") or fields.get(
+                "Selling Price"
+            )
+            if internet_price:
+                return float(internet_price)
+        except Exception:
+            pass
+
+    # Fall back to the analytics tag if pricelib is missing/unparseable
+    return float(v.get("data-dotagging-item-price", "0"))
 
 
 def extract_vehicle_data(v, base_url):
@@ -14,9 +42,7 @@ def extract_vehicle_data(v, base_url):
         model = v.get("data-model", "Unknown")
         year = int(v.get("data-year", 0))
 
-        # Extract and clean price
-        price_str = v.get("data-dotagging-item-price", "0")
-        price = float(price_str)
+        price = extract_price(v)
 
         # Extract Link (The specific structure from your HTML)
         link_elem = v.find("a", class_="hero-carousel__item--viewvehicle")
@@ -50,7 +76,7 @@ def extract_vehicle_data(v, base_url):
         return None
 
 
-def scrape(base_url, make=None, model=None, max_price=None):
+def scrape(base_url, make=None, model=None, max_price=None, max_pages=300):
     print(f"--- DealerOn (Browser): {base_url} ---")
     results = []
 
@@ -92,7 +118,6 @@ def scrape(base_url, make=None, model=None, max_price=None):
 
         # 3. PAGINATION LOOP
         page_count = 0
-        max_pages = 300
         while page_count < max_pages:
             page_count += 1
             print(f"--- Scraping Page {page_count} ---")

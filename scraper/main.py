@@ -24,7 +24,7 @@ def get_supabase():
     return create_client(url, key)
 
 
-def run_scraper(dry_run=False):
+def run_scraper(dry_run=False, max_pages=None):
     supabase = None
     if not dry_run:
         supabase = get_supabase()
@@ -74,7 +74,8 @@ def run_scraper(dry_run=False):
         print(f"Waiting {wait_time:.2f} seconds before next dealer...")
         time.sleep(wait_time)
 
-        cars_found = scraper_func(dealer["url"], None, None, None)
+        kwargs = {"max_pages": max_pages} if max_pages else {}
+        cars_found = scraper_func(dealer["url"], None, None, None, **kwargs)
         save_cars_to_db(cars_found, dry_run, supabase)
 
 
@@ -99,6 +100,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Print results without saving to Supabase",
     )
+    parser.add_argument(
+        "--max-pages",
+        type=int,
+        default=None,
+        help="Limit how many inventory pages each dealer scraper fetches (useful for quick tests)",
+    )
     args = parser.parse_args()
 
-    run_scraper(dry_run=args.dry_run)
+    run_scraper(dry_run=args.dry_run, max_pages=args.max_pages)

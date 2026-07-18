@@ -36,7 +36,7 @@ def extract_vehicle_data(card, base_url):
         return None
 
 
-def scrape(base_url, make=None, model=None, max_price=None):
+def scrape(base_url, make=None, model=None, max_price=None, max_pages=50):
     print(f"--- DealerInspire (Browser): {base_url} ---")
     results = []
 
@@ -78,7 +78,6 @@ def scrape(base_url, make=None, model=None, max_price=None):
         # Results use numbered pagination (a "Page X of Y" widget), not
         # infinite scroll. Each "Next" click replaces the current page's
         # cards, so we parse after every click rather than accumulating DOM.
-        max_pages = 50
         for page_count in range(1, max_pages + 1):
             state = page.query_selector(".pagination-state")
             print(f"--- Scraping Page {page_count} ({state.inner_text() if state else '?'}) ---")
