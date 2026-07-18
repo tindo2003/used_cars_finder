@@ -6,24 +6,7 @@ from db import DbClient
 
 RESEND_API_URL = "https://api.resend.com/emails"
 
-# A saved search with no filters at all would otherwise match every
-# active listing. Instead of notifying for all of them, only the
-# cheapest N are considered "the top deals" for an unfiltered search.
-TOP_UNFILTERED_DEALS = 10
-
-
-def has_no_filters(search):
-    return not any(
-        [
-            search.get("make"),
-            search.get("model"),
-            search.get("max_price") is not None,
-            search.get("min_year") is not None,
-            search.get("max_mileage") is not None,
-            search.get("transmission"),
-            search.get("seller_type"),
-        ]
-    )
+DEFAULT_TOP_N = 10
 
 
 def matches(listing, search):
@@ -33,7 +16,9 @@ def matches(listing, search):
     corresponding listing field is missing (e.g. mileage, which many
     Craigslist listings lack) does not disqualify the listing -- we'd
     rather over-notify on incomplete data than silently hide a possible
-    deal because a field wasn't scraped.
+    deal because a field wasn't scraped. A search with every filter
+    unset matches every listing -- notify_matches' top_n cap is what
+    keeps that from emailing the entire table.
     """
     if search.get("make") and search["make"].lower() != (listing.get("make") or "").lower():
         return False
@@ -72,16 +57,28 @@ def matches(listing, search):
     return True
 
 
-def send_email(to_email, listing):
-    api_key = os.environ.get("RESEND_API_KEY")
-    if not api_key:
-        raise ValueError("Missing RESEND_API_KEY")
-
+def _format_listing_html(listing):
     price = listing.get("price")
     price_str = f"${float(price):,.0f}" if price is not None else "N/A"
     mileage = listing.get("mileage")
     mileage_str = f"{mileage:,} mi" if mileage is not None else "mileage unknown"
     title = f"{listing.get('model_year')} {listing.get('make')} {listing.get('model')}"
+    return (
+        f"<li><strong>{title}</strong> — {price_str} ({mileage_str}) "
+        f"— {listing.get('marketplace_source')} — "
+        f'<a href="{listing.get("original_url")}">View listing</a></li>'
+    )
+
+
+def send_digest_email(to_email, listings):
+    """Send one email listing every car in `listings` (already capped to top_n by the caller)."""
+    api_key = os.environ.get("RESEND_API_KEY")
+    if not api_key:
+        raise ValueError("Missing RESEND_API_KEY")
+
+    count = len(listings)
+    subject = f"{count} new match{'es' if count != 1 else ''} for your saved search"
+    items_html = "".join(_format_listing_html(listing) for listing in listings)
 
     res = requests.post(
         RESEND_API_URL,
@@ -89,27 +86,28 @@ def send_email(to_email, listing):
         json={
             "from": "Used Car Finder <onboarding@resend.dev>",
             "to": [to_email],
-            "subject": f"New match: {title} - {price_str}",
-            "html": (
-                f"<p>A new listing matches one of your saved searches:</p>"
-                f"<p><strong>{title}</strong> — {price_str} ({mileage_str})</p>"
-                f"<p>Source: {listing.get('marketplace_source')}</p>"
-                f"<p><a href=\"{listing.get('original_url')}\">View listing</a></p>"
-            ),
+            "subject": subject,
+            "html": f"<p>New listings matching your saved search:</p><ul>{items_html}</ul>",
         },
     )
     res.raise_for_status()
     return res.json()
 
 
-def notify_matches(supabase, send_email_fn=None):
+def notify_matches(supabase, send_email_fn=None, top_n=DEFAULT_TOP_N):
     """
-    Check every active listing against every active saved search and
-    email the search's owner for any match that hasn't already been
-    notified (tracked in notification_history). Returns the number of
-    notifications sent.
+    For every active saved search, find listings that match it and
+    haven't already been notified (tracked in notification_history),
+    keep the top_n cheapest, and send a single digest email covering all
+    of them. A search with no filters set matches every listing, so
+    top_n is what keeps it from emailing the whole table -- and since
+    only listings actually included in an email get recorded in
+    notification_history, the next run naturally surfaces the next-best
+    deals once the current top_n have been seen.
+
+    Returns the number of emails sent (not the number of listings).
     """
-    send_email_fn = send_email_fn or send_email
+    send_email_fn = send_email_fn or send_digest_email
 
     listings_db = DbClient(supabase, table="listings")
     searches_db = DbClient(supabase, table="saved_searches")
@@ -121,27 +119,25 @@ def notify_matches(supabase, send_email_fn=None):
         (row["saved_search_id"], row["listing_id"]) for row in history_db.read()
     }
 
-    sent = 0
+    emails_sent = 0
     for search in searches:
-        if has_no_filters(search):
-            # No way to judge "matches" without any criteria -- fall back
-            # to the cheapest N listings overall as a crude deal signal.
-            candidates = sorted(
-                listings, key=lambda l: l.get("price") if l.get("price") is not None else float("inf")
-            )[:TOP_UNFILTERED_DEALS]
-        else:
-            candidates = listings
+        new_matches = [
+            listing
+            for listing in listings
+            if (search["id"], listing["id"]) not in already_notified and matches(listing, search)
+        ]
+        if not new_matches:
+            continue
 
-        for listing in candidates:
-            key = (search["id"], listing["id"])
-            if key in already_notified:
-                continue
-            if not matches(listing, search):
-                continue
+        top_matches = sorted(
+            new_matches,
+            key=lambda listing: listing.get("price") if listing.get("price") is not None else float("inf"),
+        )[:top_n]
 
-            send_email_fn(search["email"], listing)
+        send_email_fn(search["email"], top_matches)
+        for listing in top_matches:
             history_db.create({"saved_search_id": search["id"], "listing_id": listing["id"]})
-            already_notified.add(key)
-            sent += 1
+            already_notified.add((search["id"], listing["id"]))
+        emails_sent += 1
 
-    return sent
+    return emails_sent
