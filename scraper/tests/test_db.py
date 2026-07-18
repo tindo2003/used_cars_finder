@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from db import ListingsDB, get_conflict_key
+from db import DbClient, get_conflict_key
 
 
 class FakeResult:
@@ -124,7 +124,7 @@ def test_get_conflict_key_falls_back_to_original_url_when_vin_empty_string():
 
 def test_create_inserts_the_given_car():
     supabase = FakeSupabase()
-    db = ListingsDB(supabase)
+    db = DbClient(supabase)
 
     db.create({"vin": "A", "make": "Toyota"})
 
@@ -137,7 +137,7 @@ def test_create_inserts_the_given_car():
 
 def test_read_returns_rows_matching_filters():
     supabase = FakeSupabase(data=[{"vin": "A", "make": "Toyota"}])
-    db = ListingsDB(supabase)
+    db = DbClient(supabase)
 
     rows = db.read(vin="A")
 
@@ -148,7 +148,7 @@ def test_read_returns_rows_matching_filters():
 
 def test_read_with_no_filters_selects_everything():
     supabase = FakeSupabase(data=[{"vin": "A"}, {"vin": "B"}])
-    db = ListingsDB(supabase)
+    db = DbClient(supabase)
 
     rows = db.read()
 
@@ -161,7 +161,7 @@ def test_read_with_no_filters_selects_everything():
 
 def test_update_applies_fields_to_rows_matching_the_given_filters():
     supabase = FakeSupabase()
-    db = ListingsDB(supabase)
+    db = DbClient(supabase)
 
     db.update({"vin": "A"}, {"status": "sold"})
 
@@ -176,7 +176,7 @@ def test_update_applies_fields_to_rows_matching_the_given_filters():
 
 def test_delete_removes_rows_matching_filters():
     supabase = FakeSupabase()
-    db = ListingsDB(supabase)
+    db = DbClient(supabase)
 
     db.delete(vin="A")
 
@@ -190,7 +190,7 @@ def test_delete_removes_rows_matching_filters():
 
 def test_upsert_uses_vin_as_conflict_key_when_present():
     supabase = FakeSupabase()
-    db = ListingsDB(supabase)
+    db = DbClient(supabase)
 
     db.upsert({"vin": "A", "original_url": "https://example.com/a"})
 
@@ -202,7 +202,7 @@ def test_upsert_uses_vin_as_conflict_key_when_present():
 
 def test_upsert_falls_back_to_original_url_when_vin_missing():
     supabase = FakeSupabase()
-    db = ListingsDB(supabase)
+    db = DbClient(supabase)
 
     db.upsert({"original_url": "https://craigslist.org/view/d/example"})
 
@@ -211,7 +211,7 @@ def test_upsert_falls_back_to_original_url_when_vin_missing():
 
 def test_upsert_does_not_mutate_the_caller_dict():
     supabase = FakeSupabase()
-    db = ListingsDB(supabase)
+    db = DbClient(supabase)
     car = {"vin": "A"}
 
     db.upsert(car)
@@ -224,7 +224,7 @@ def test_upsert_does_not_mutate_the_caller_dict():
 
 def test_bulk_save_dry_run_never_touches_supabase(capsys):
     supabase = FakeSupabase()
-    db = ListingsDB(supabase)
+    db = DbClient(supabase)
     progress = make_progress()
 
     db.bulk_save(
@@ -241,7 +241,7 @@ def test_bulk_save_dry_run_never_touches_supabase(capsys):
 
 def test_bulk_save_increments_progress_for_every_car():
     supabase = FakeSupabase()
-    db = ListingsDB(supabase)
+    db = DbClient(supabase)
     progress = make_progress()
     cars = [{"vin": f"VIN{i}"} for i in range(5)]
 
@@ -253,7 +253,7 @@ def test_bulk_save_increments_progress_for_every_car():
 
 def test_bulk_save_throttles_progress_logging(capsys):
     supabase = FakeSupabase()
-    db = ListingsDB(supabase)
+    db = DbClient(supabase)
     # last_log far enough in the past that the very first save should log.
     progress = make_progress(last_log=0)
     cars = [{"vin": f"VIN{i}"} for i in range(5)]
@@ -269,7 +269,7 @@ def test_bulk_save_throttles_progress_logging(capsys):
 
 def test_bulk_save_logs_again_once_interval_elapses():
     supabase = FakeSupabase()
-    db = ListingsDB(supabase)
+    db = DbClient(supabase)
     progress = make_progress(last_log=0)
 
     db.bulk_save([{"vin": "A"}], dry_run=False, progress=progress, log_interval_seconds=0)
@@ -285,7 +285,7 @@ def test_bulk_save_logs_again_once_interval_elapses():
 
 
 def test_operations_raise_a_clear_error_without_a_supabase_client():
-    db = ListingsDB()
+    db = DbClient()
 
     with pytest.raises(ValueError):
         db.read()

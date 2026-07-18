@@ -1,7 +1,7 @@
 import argparse
 from providers import craigslist, dealeron, dealerinspire
 from options import ScrapeOptions
-from db import get_supabase, ListingsDB
+from db import get_supabase, DbClient
 import time
 import random
 
@@ -36,7 +36,7 @@ def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1):
     else:
         print("--- RUNNING IN DRY RUN MODE (No DB connection) ---")
 
-    listings_db = ListingsDB(supabase)
+    db_client = DbClient(supabase)
 
     # Progress is logged at most once per log_interval_minutes instead of
     # once per saved listing, to keep GitHub Actions logs readable.
@@ -73,7 +73,7 @@ def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1):
         options = ScrapeOptions(make=make, model=model, max_price=search.get("max_price"))
         for provider_func in active_marketplaces:
             cars_found = provider_func(options)
-            listings_db.bulk_save(cars_found, dry_run, progress, log_interval_seconds)
+            db_client.bulk_save(cars_found, dry_run, progress, log_interval_seconds)
 
     # --- 2. Scrape Dealerships (Independently of user searches) ---
     # Dealerships have their own inventory; we scrape their full used list
@@ -90,7 +90,7 @@ def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1):
 
         options = ScrapeOptions(max_pages=max_pages, city=dealer.get("city"))
         cars_found = scraper_func(dealer["url"], options)
-        listings_db.bulk_save(cars_found, dry_run, progress, log_interval_seconds)
+        db_client.bulk_save(cars_found, dry_run, progress, log_interval_seconds)
 
     print(f"Done. Saved {progress['saved']} listings total.")
 

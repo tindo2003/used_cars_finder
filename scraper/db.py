@@ -21,39 +21,38 @@ def get_conflict_key(car):
     return "vin" if car.get("vin") else "original_url"
 
 
-class ListingsDB:
-    """CRUD access to the `listings` table."""
+class DbClient:
+    """Generic CRUD access to a Supabase table (defaults to `listings`)."""
 
-    TABLE = "listings"
-
-    def __init__(self, supabase=None):
+    def __init__(self, supabase=None, table="listings"):
         self.supabase = supabase
+        self.table_name = table
 
     def _table(self):
         if self.supabase is None:
-            raise ValueError("ListingsDB was constructed without a Supabase client")
-        return self.supabase.table(self.TABLE)
+            raise ValueError("DbClient was constructed without a Supabase client")
+        return self.supabase.table(self.table_name)
 
-    def create(self, car):
-        """Insert a new listing row."""
-        return self._table().insert(car).execute()
+    def create(self, row):
+        """Insert a new row."""
+        return self._table().insert(row).execute()
 
     def read(self, **filters):
-        """Fetch listings matching equality filters, e.g. read(vin='...')."""
+        """Fetch rows matching equality filters, e.g. read(vin='...')."""
         query = self._table().select("*")
         for key, value in filters.items():
             query = query.eq(key, value)
         return query.execute().data
 
     def update(self, match, fields):
-        """Update listing(s) matching the `match` equality filters with `fields`."""
+        """Update row(s) matching the `match` equality filters with `fields`."""
         query = self._table().update(fields)
         for key, value in match.items():
             query = query.eq(key, value)
         return query.execute()
 
     def delete(self, **match):
-        """Delete listing(s) matching equality filters."""
+        """Delete row(s) matching equality filters."""
         query = self._table().delete()
         for key, value in match.items():
             query = query.eq(key, value)
