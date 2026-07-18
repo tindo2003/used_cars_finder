@@ -49,7 +49,7 @@ def extract_posted_at(v):
     return None
 
 
-def extract_vehicle_data(v, base_url, city=None):
+def extract_vehicle_data(v, base_url, city=None, dealer_name=None):
     """
     Extracts vehicle details from a BeautifulSoup element.
     v: The BeautifulSoup element representing the vehicle card div.
@@ -93,6 +93,7 @@ def extract_vehicle_data(v, base_url, city=None):
             "transmission": v.get("data-trans") or None,
             "fuel_type": v.get("data-fueltype") or None,
             "city": city,
+            "dealer_name": dealer_name,
             "posted_at": extract_posted_at(v),
             "photos": [photo_url] if photo_url else [],
         }
@@ -162,7 +163,7 @@ def scrape(base_url, options: ScrapeOptions = None):
 
             vehicles = soup.find_all("div", class_="vehicle-card")
             for v in vehicles:
-                car_data = extract_vehicle_data(v, base_url, city=options.city)
+                car_data = extract_vehicle_data(v, base_url, city=options.city, dealer_name=options.dealer_name)
                 if car_data:
                     # Apply filters
                     if options.make and options.make.lower() not in car_data["make"].lower():

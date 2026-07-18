@@ -4,7 +4,7 @@ import json
 from options import ScrapeOptions
 
 
-def extract_vehicle_data(card, base_url, city=None):
+def extract_vehicle_data(card, base_url, city=None, dealer_name=None):
     """
     Extracts vehicle details from a Playwright element handle for a
     DealerInspire ".result-wrap" card. Unlike DealerOn, all vehicle fields
@@ -40,6 +40,7 @@ def extract_vehicle_data(card, base_url, city=None):
             "seller_type": "dealer",
             "fuel_type": data.get("fueltype") or None,
             "city": city,
+            "dealer_name": dealer_name,
             "posted_at": data.get("date_in_stock") or None,
             "photos": [photo_url] if photo_url else [],
         }
@@ -103,7 +104,7 @@ def scrape(base_url, options: ScrapeOptions = None):
 
             cards = page.query_selector_all(".result-wrap")
             for card in cards:
-                car_data = extract_vehicle_data(card, base_url, city=options.city)
+                car_data = extract_vehicle_data(card, base_url, city=options.city, dealer_name=options.dealer_name)
                 if car_data:
                     if options.make and options.make.lower() not in car_data["make"].lower():
                         continue

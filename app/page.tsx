@@ -11,6 +11,22 @@ const PRICE_MAX = 100000;
 
 const inputTextClass = "text-slate-900 placeholder:text-slate-400";
 
+// marketplace_source is an internal platform code (e.g. "dealerinspire",
+// "dealeron"), not something a customer would recognize. Prefer the
+// actual dealership name (with city) when we have it; only fall back to
+// a friendly marketplace label for non-dealer sources like Craigslist.
+const MARKETPLACE_LABELS: Record<string, string> = {
+    craigslist: "Craigslist",
+    ebay: "eBay",
+};
+
+function getSellerLabel(car: any) {
+    if (car.dealer_name) {
+        return car.city ? `${car.dealer_name} · ${car.city}` : car.dealer_name;
+    }
+    return MARKETPLACE_LABELS[car.marketplace_source] ?? car.marketplace_source;
+}
+
 export default function Home() {
     const supabase = createClient();
 
@@ -200,10 +216,10 @@ export default function Home() {
                                         ? `${car.mileage.toLocaleString()} miles`
                                         : "Mileage not listed"}
                                 </p>
-                                <p className="capitalize">
+                                <p>
                                     Source:{" "}
                                     <span className="font-medium text-slate-800">
-                                        {car.marketplace_source}
+                                        {getSellerLabel(car)}
                                     </span>
                                 </p>
                             </div>

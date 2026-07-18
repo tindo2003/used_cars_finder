@@ -156,6 +156,54 @@ describe("search filters", () => {
     });
 });
 
+describe("listing display", () => {
+    it("shows the dealership name and city instead of the raw platform code", async () => {
+        setFakeSupabase(
+            makeFakeSupabase({
+                listingsResult: {
+                    data: [makeListing({ marketplace_source: "dealerinspire", dealer_name: "Capitol Honda", city: "San Jose" })],
+                    error: null,
+                },
+            })
+        );
+
+        render(<Home />);
+
+        expect(await screen.findByText("Capitol Honda · San Jose")).toBeInTheDocument();
+        expect(screen.queryByText("dealerinspire")).not.toBeInTheDocument();
+    });
+
+    it("shows just the dealership name when no city is known", async () => {
+        setFakeSupabase(
+            makeFakeSupabase({
+                listingsResult: {
+                    data: [makeListing({ marketplace_source: "dealeron", dealer_name: "Stevens Creek Toyota", city: null })],
+                    error: null,
+                },
+            })
+        );
+
+        render(<Home />);
+
+        expect(await screen.findByText("Stevens Creek Toyota")).toBeInTheDocument();
+    });
+
+    it("falls back to a friendly marketplace label when there's no dealer name", async () => {
+        setFakeSupabase(
+            makeFakeSupabase({
+                listingsResult: {
+                    data: [makeListing({ marketplace_source: "craigslist", dealer_name: null })],
+                    error: null,
+                },
+            })
+        );
+
+        render(<Home />);
+
+        expect(await screen.findByText("Craigslist")).toBeInTheDocument();
+    });
+});
+
 describe("save search", () => {
     it("warns instead of saving when no email is entered", async () => {
         const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
