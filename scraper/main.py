@@ -7,15 +7,19 @@ import time
 import random
 
 DEALERS = [
+    # San Jose
     {"url": "https://www.stevenscreektoyota.com", "platform": "dealeron"},
-    {"url": "https://www.chevroletoffremont.com", "platform": "dealeron"},
-    {"url": "https://www.fremonthyundai.com", "platform": "dealeron"},
     {"url": "https://www.capitolhonda.com", "platform": "dealerinspire"},
     {"url": "https://www.capitolford.com", "platform": "dealerinspire"},
     {"url": "https://www.capitolchevysj.com", "platform": "dealerinspire"},
     {"url": "https://www.capitolhyundaisj.com", "platform": "dealerinspire"},
+    # Santa Clara
     {"url": "https://www.stevenscreekhyundai.com", "platform": "dealerinspire"},
+    # Sunnyvale
     {"url": "https://www.sunnyvalehonda.com", "platform": "dealerinspire"},
+    # Fremont / Newark
+    {"url": "https://www.chevroletoffremont.com", "platform": "dealeron"},
+    {"url": "https://www.fremonthyundai.com", "platform": "dealeron"},
     {"url": "https://www.fremontcdjr.com", "platform": "dealerinspire"},
 ]
 
