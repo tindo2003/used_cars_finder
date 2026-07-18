@@ -25,7 +25,7 @@ def extract_vehicle_data(v, base_url):
         # Extract Image
         img_elem = v.find("img", class_="hero-carousel__background-image--grid")
         img_src = img_elem.get("src") if img_elem else None
-    
+
         # If the src starts with /, prepend the base_url
         if img_src and img_src.startswith("/"):
             photo_url = f"{base_url.rstrip('/')}{img_src}"
@@ -92,7 +92,7 @@ def scrape(base_url, make=None, model=None, max_price=None):
 
         # 3. PAGINATION LOOP
         page_count = 0
-        max_pages = 50
+        max_pages = 300
         while page_count < max_pages:
             page_count += 1
             print(f"--- Scraping Page {page_count} ---")
