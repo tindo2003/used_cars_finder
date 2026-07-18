@@ -2,6 +2,7 @@ import argparse
 from providers import craigslist, dealeron, dealerinspire
 from options import ScrapeOptions
 from db import get_supabase, DbClient
+from notifications import notify_matches
 import time
 import random
 
@@ -93,6 +94,10 @@ def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1):
         db_client.bulk_save(cars_found, dry_run, progress, log_interval_seconds)
 
     print(f"Done. Saved {progress['saved']} listings total.")
+
+    if not dry_run:
+        sent = notify_matches(supabase)
+        print(f"Sent {sent} notification email(s).")
 
 
 if __name__ == "__main__":

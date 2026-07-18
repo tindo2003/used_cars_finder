@@ -16,14 +16,16 @@ Checked against [prd.md](./prd.md) (sections referenced in brackets) and the act
 - [ ] Geocoding listings into the `location` PostGIS column (city text is populated, lat/long is not) — needed for radius search [4.2, 5.4]
 - [ ] Unit tests for provider parsing logic (dealeron/dealerinspire/craigslist `extract_*` functions) using fixture HTML
 
-## The biggest gap: notification/matching engine — not started
+## Notification/matching engine — built 2026-07-18, needs manual setup to go live
 
-- [ ] Evaluate newly-scraped listings against active `saved_searches` rows [3.6, 4.6]
-- [ ] Email notifications
-- [ ] Browser push notifications
-- [ ] Dedup so the same listing never notifies twice [4.6]
+- [x] Evaluate every active listing against every active `saved_searches` row (`scraper/notifications.py`) [3.6, 4.6]
+- [x] Email notifications via Resend
+- [ ] Browser push notifications — not built (email-only for now; sufficient for single-user/personal use)
+- [x] Dedup so the same listing never notifies twice — `notification_history` table with a unique `(saved_search_id, listing_id)` constraint, survives crashes/re-runs [4.6]
+- [x] 17 unit tests (`tests/test_notifications.py`) covering the match logic and orchestration
+- [ ] **Manual setup still needed:** run `migrations/002_add_notification_history.sql` in Supabase, and add `RESEND_API_KEY` to both `scraper/.env` (local) and GitHub Actions secrets (cron)
 
-This is the PRD's own framing of the product's core value ("the intelligence layer"), and right now `saved_searches` rows are written but nothing ever reads them back. **For a deal-hunter audience this is even more clearly the #1 priority** — being first to see an underpriced listing before someone else grabs it is the entire pitch; a search UI without this is just a slower version of checking each dealer site manually.
+Known scope choice: matches are re-checked against *every* active listing on every run (not just newly-inserted ones), relying entirely on `notification_history` for dedup rather than insert-vs-update detection. Simpler and crash-safe, at the cost of rechecking existing listings against a newly-created saved search (which will notify for pre-existing matching inventory the first time — arguably more useful for a deal hunter than the PRD's literal "newly indexed listings only" wording).
 
 ## Deal-hunter signal — not in the original PRD scope, flagging as a decision
 

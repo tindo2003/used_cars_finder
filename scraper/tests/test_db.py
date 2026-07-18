@@ -3,97 +3,7 @@ import time
 import pytest
 
 from db import DbClient, get_conflict_key
-
-
-class FakeResult:
-    def __init__(self, data):
-        self.data = data
-
-
-class FakeQuery:
-    """
-    Minimal stand-in for supabase-py's fluent query builder: every method
-    returns self (or a query already carrying the recorded operation) so
-    calls can be chained the same way as the real client, e.g.
-    .select("*").eq("vin", "X").execute().
-    """
-
-    def __init__(self, table):
-        self.table = table
-        self.op = None
-        self.payload = None
-        self.on_conflict = None
-        self.filters = {}
-
-    def select(self, *_args):
-        self.op = "select"
-        return self
-
-    def insert(self, payload):
-        self.op = "insert"
-        self.payload = payload
-        return self
-
-    def update(self, payload):
-        self.op = "update"
-        self.payload = payload
-        return self
-
-    def delete(self):
-        self.op = "delete"
-        return self
-
-    def upsert(self, payload, on_conflict):
-        self.op = "upsert"
-        self.payload = payload
-        self.on_conflict = on_conflict
-        return self
-
-    def eq(self, key, value):
-        self.filters[key] = value
-        return self
-
-    def execute(self):
-        self.table.calls.append(
-            {
-                "op": self.op,
-                "payload": self.payload,
-                "on_conflict": self.on_conflict,
-                "filters": dict(self.filters),
-            }
-        )
-        return FakeResult(self.table.data)
-
-
-class FakeTable:
-    def __init__(self, name, data=None):
-        self.name = name
-        self.data = data if data is not None else []
-        self.calls = []
-
-    def select(self, *args):
-        return FakeQuery(self).select(*args)
-
-    def insert(self, payload):
-        return FakeQuery(self).insert(payload)
-
-    def update(self, payload):
-        return FakeQuery(self).update(payload)
-
-    def delete(self):
-        return FakeQuery(self).delete()
-
-    def upsert(self, payload, on_conflict):
-        return FakeQuery(self).upsert(payload, on_conflict=on_conflict)
-
-
-class FakeSupabase:
-    def __init__(self, data=None):
-        self.listings = FakeTable("listings", data)
-
-    def table(self, name):
-        assert name == "listings"
-        return self.listings
+from tests.fakes import FakeSupabase
 
 
 def make_progress(last_log=None):
@@ -128,61 +38,54 @@ def test_create_inserts_the_given_car():
 
     db.create({"vin": "A", "make": "Toyota"})
 
-    assert supabase.listings.calls[0]["op"] == "insert"
-    assert supabase.listings.calls[0]["payload"] == {"vin": "A", "make": "Toyota"}
+    calls = supabase.table("listings").calls
+    assert calls[0]["op"] == "insert"
+    assert calls[0]["payload"] == {"vin": "A", "make": "Toyota"}
 
 
 # --- read ---
 
 
 def test_read_returns_rows_matching_filters():
-    supabase = FakeSupabase(data=[{"vin": "A", "make": "Toyota"}])
+    supabase = FakeSupabase(initial_data={"listings": [{"vin": "A", "make": "Toyota"}, {"vin": "B", "make": "Honda"}]})
     db = DbClient(supabase)
 
     rows = db.read(vin="A")
 
     assert rows == [{"vin": "A", "make": "Toyota"}]
-    assert supabase.listings.calls[0]["op"] == "select"
-    assert supabase.listings.calls[0]["filters"] == {"vin": "A"}
 
 
 def test_read_with_no_filters_selects_everything():
-    supabase = FakeSupabase(data=[{"vin": "A"}, {"vin": "B"}])
+    supabase = FakeSupabase(initial_data={"listings": [{"vin": "A"}, {"vin": "B"}]})
     db = DbClient(supabase)
 
     rows = db.read()
 
     assert len(rows) == 2
-    assert supabase.listings.calls[0]["filters"] == {}
 
 
 # --- update ---
 
 
 def test_update_applies_fields_to_rows_matching_the_given_filters():
-    supabase = FakeSupabase()
+    supabase = FakeSupabase(initial_data={"listings": [{"vin": "A", "status": "active"}]})
     db = DbClient(supabase)
 
     db.update({"vin": "A"}, {"status": "sold"})
 
-    call = supabase.listings.calls[0]
-    assert call["op"] == "update"
-    assert call["payload"] == {"status": "sold"}
-    assert call["filters"] == {"vin": "A"}
+    assert supabase.table("listings").data[0]["status"] == "sold"
 
 
 # --- delete ---
 
 
 def test_delete_removes_rows_matching_filters():
-    supabase = FakeSupabase()
+    supabase = FakeSupabase(initial_data={"listings": [{"vin": "A"}, {"vin": "B"}]})
     db = DbClient(supabase)
 
     db.delete(vin="A")
 
-    call = supabase.listings.calls[0]
-    assert call["op"] == "delete"
-    assert call["filters"] == {"vin": "A"}
+    assert supabase.table("listings").data == [{"vin": "B"}]
 
 
 # --- upsert ---
@@ -194,7 +97,7 @@ def test_upsert_uses_vin_as_conflict_key_when_present():
 
     db.upsert({"vin": "A", "original_url": "https://example.com/a"})
 
-    call = supabase.listings.calls[0]
+    call = supabase.table("listings").calls[0]
     assert call["op"] == "upsert"
     assert call["on_conflict"] == "vin"
     assert call["payload"]["status"] == "active"
@@ -206,7 +109,7 @@ def test_upsert_falls_back_to_original_url_when_vin_missing():
 
     db.upsert({"original_url": "https://craigslist.org/view/d/example"})
 
-    assert supabase.listings.calls[0]["on_conflict"] == "original_url"
+    assert supabase.table("listings").calls[0]["on_conflict"] == "original_url"
 
 
 def test_upsert_does_not_mutate_the_caller_dict():
@@ -217,6 +120,18 @@ def test_upsert_does_not_mutate_the_caller_dict():
     db.upsert(car)
 
     assert "status" not in car
+
+
+def test_upsert_updates_in_place_on_conflict():
+    supabase = FakeSupabase(initial_data={"listings": [{"id": "1", "vin": "A", "original_url": "https://example.com/a", "price": 100}]})
+    db = DbClient(supabase)
+
+    db.upsert({"vin": "A", "original_url": "https://example.com/b", "price": 200})
+
+    rows = supabase.table("listings").data
+    assert len(rows) == 1
+    assert rows[0]["original_url"] == "https://example.com/b"
+    assert rows[0]["price"] == 200
 
 
 # --- bulk_save ---
@@ -234,7 +149,7 @@ def test_bulk_save_dry_run_never_touches_supabase(capsys):
         log_interval_seconds=60,
     )
 
-    assert supabase.listings.calls == []
+    assert supabase.table("listings").calls == []
     assert progress["saved"] == 0
     assert "DRY RUN" in capsys.readouterr().out
 
@@ -248,7 +163,7 @@ def test_bulk_save_increments_progress_for_every_car():
     db.bulk_save(cars, dry_run=False, progress=progress, log_interval_seconds=9999)
 
     assert progress["saved"] == 5
-    assert len(supabase.listings.calls) == 5
+    assert len(supabase.table("listings").data) == 5
 
 
 def test_bulk_save_throttles_progress_logging(capsys):
