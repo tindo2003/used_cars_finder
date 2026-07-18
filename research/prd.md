@@ -3,14 +3,19 @@ Version: 1.0
 Status: MVP
 Platform: Responsive Web Application
 
+## Addendum: Audience Refinement (2026-07-18)
+The sections below have been lightly revised to sharpen the target audience from "people shopping for a used vehicle" to "Bay Area buyers specifically hunting for good deals." This changes what "core value" means for the MVP: speed-to-notification and price/value signals matter more than search breadth or filter completeness. See `research/mvp-checklist.md` for how this reprioritizes the build order.
+
+Non-Goals (2.5) and Future Roadmap (8) are intentionally left mostly as originally scoped — pulling a minimal deal signal forward into MVP is flagged there as an open decision, not resolved here.
+
 ## 1. Introduction
 
 ### 1.1 Overview
-Used Car Finder is a web application that helps users discover used vehicles across multiple online marketplaces through a single search experience. Instead of manually searching Facebook Marketplace, Craigslist, Cars.com, Autotrader, and dealership websites individually, users can search once and view aggregated results from every supported source.
+Used Car Finder is a web application that helps Bay Area buyers find good deals on used vehicles across multiple online marketplaces through a single search experience. Instead of manually searching Facebook Marketplace, Craigslist, Cars.com, Autotrader, and dealership websites individually — and refreshing each one repeatedly hoping to catch an underpriced listing before someone else does — users can search once and view aggregated results from every supported source.
 
 The application is not a marketplace. It does not facilitate messaging, payments, financing, or vehicle purchases. Its purpose is to discover listings, organize them into a consistent format, and notify users as soon as vehicles matching their preferences become available.
 
-The initial release focuses exclusively on the San Francisco Bay Area and is designed to validate one core hypothesis: buyers are willing to rely on a dedicated search platform if it consistently surfaces relevant vehicles faster than manually searching multiple websites.
+The initial release focuses exclusively on the San Francisco Bay Area and is designed to validate one core hypothesis: buyers are willing to rely on a dedicated search platform if it consistently surfaces good-value vehicles faster than manually searching multiple websites.
 
 ### 1.2 Problem Statement
 The used car buying process is fragmented across numerous websites, each containing only a subset of available inventory. Buyers often spend weeks repeatedly refreshing multiple marketplaces throughout the day in hopes of finding a vehicle before someone else purchases it.
@@ -32,7 +37,7 @@ A successful MVP allows users to define a search once, save it, and trust the ap
 ## 2. Product Scope
 
 ### 2.1 Target Audience
-The initial audience consists of people actively shopping for a used vehicle within the San Francisco Bay Area. This includes first-time buyers, students, commuters, families, automotive enthusiasts, and electric vehicle shoppers.
+The initial audience consists of Bay Area buyers actively looking for a good deal on a used vehicle, not just any listing that happens to match a make and model. This includes first-time buyers, students, commuters, families, automotive enthusiasts, and electric vehicle shoppers — united by being price-sensitive and willing to act fast when a strong deal appears.
 
 ### 2.2 Geographic Scope
 The MVP is limited to listings located within the San Francisco Bay Area, including San Francisco, Oakland, Berkeley, Fremont, Palo Alto, Mountain View, Sunnyvale, San Jose, Redwood City, San Mateo, Santa Clara, and surrounding communities.
@@ -51,6 +56,8 @@ The frontend should treat every listing identically regardless of its source whi
 
 ### 2.5 Non-Goals
 The MVP intentionally excludes AI-generated summaries, deal scoring, VIN decoding, ownership cost estimation, financing tools, dealer ratings, image analysis, and market analytics. These features provide additional value but are not required to validate the core product.
+
+Given the refined deal-hunter audience above, deal scoring specifically is worth revisiting for a minimal version rather than a hard exclusion — a crude "$X below similar listings" signal, not the full roadmap item — see the open decision in `research/mvp-checklist.md`. The remaining items stay out of scope for MVP.
 
 ## 3. User Experience
 
@@ -133,6 +140,8 @@ Results should support sorting by:
 - Lowest Mileage
 
 Newest Listings is the default sort order.
+
+For the refined deal-hunter audience, Lowest Price is arguably a stronger default than Newest Listings — flagged for reconsideration rather than changed unilaterally here.
 
 ### 4.4 Listings
 Every listing should contain a standardized set of information regardless of its source, including pricing, mileage, location, photos, description, posting time, and marketplace attribution.
