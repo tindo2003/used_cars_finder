@@ -4,15 +4,22 @@ import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@/utils/supabase/client";
 import Image from "next/image";
 
+const YEAR_MIN = 1990;
+const YEAR_MAX = new Date().getFullYear();
+const MILEAGE_MAX = 200000;
+const PRICE_MAX = 100000;
+
+const inputTextClass = "text-slate-900 placeholder:text-slate-400";
+
 export default function Home() {
     const supabase = createClient();
 
     // --- Filter State ---
     const [make, setMake] = useState("");
     const [model, setModel] = useState("");
-    const [minYear, setMinYear] = useState("");
-    const [maxMileage, setMaxMileage] = useState("");
-    const [maxPrice, setMaxPrice] = useState("");
+    const [minYear, setMinYear] = useState(YEAR_MIN);
+    const [maxMileage, setMaxMileage] = useState(MILEAGE_MAX);
+    const [maxPrice, setMaxPrice] = useState(PRICE_MAX);
 
     // --- Data State ---
     const [listings, setListings] = useState<any[]>([]);
@@ -40,9 +47,9 @@ export default function Home() {
 
             if (make.trim()) query = query.ilike("make", `%${make.trim()}%`);
             if (model.trim()) query = query.ilike("model", `%${model.trim()}%`);
-            if (minYear.trim()) query = query.gte("model_year", parseInt(minYear));
-            if (maxMileage.trim()) query = query.lte("mileage", parseInt(maxMileage));
-            if (maxPrice.trim()) query = query.lte("price", parseInt(maxPrice));
+            if (minYear > YEAR_MIN) query = query.gte("model_year", minYear);
+            if (maxMileage < MILEAGE_MAX) query = query.lte("mileage", maxMileage);
+            if (maxPrice < PRICE_MAX) query = query.lte("price", maxPrice);
 
             const { data, error: fetchError } = await query.limit(50);
 
@@ -68,9 +75,9 @@ export default function Home() {
     const handleClearFilters = () => {
         setMake("");
         setModel("");
-        setMinYear("");
-        setMaxMileage("");
-        setMaxPrice("");
+        setMinYear(YEAR_MIN);
+        setMaxMileage(MILEAGE_MAX);
+        setMaxPrice(PRICE_MAX);
     };
 
     const handleSaveSearch = async (e: React.FormEvent) => {
@@ -87,9 +94,9 @@ export default function Home() {
             email: email.trim(),
             make: make.trim() || null,
             model: model.trim() || null,
-            min_year: minYear ? parseInt(minYear) : null,
-            max_mileage: maxMileage ? parseInt(maxMileage) : null,
-            max_price: maxPrice ? parseInt(maxPrice) : null,
+            min_year: minYear > YEAR_MIN ? minYear : null,
+            max_mileage: maxMileage < MILEAGE_MAX ? maxMileage : null,
+            max_price: maxPrice < PRICE_MAX ? maxPrice : null,
         });
 
         if (error) {
@@ -217,8 +224,8 @@ export default function Home() {
 
                 {/* Search & Filter Card */}
                 <section className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
-                    <form onSubmit={handleSearch} className="space-y-4">
-                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <form onSubmit={handleSearch} className="space-y-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label
                                     htmlFor="make"
@@ -232,7 +239,7 @@ export default function Home() {
                                     placeholder="e.g. Toyota"
                                     value={make}
                                     onChange={(e) => setMake(e.target.value)}
-                                    className="w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                                    className={`w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition ${inputTextClass}`}
                                 />
                             </div>
                             <div>
@@ -248,58 +255,87 @@ export default function Home() {
                                     placeholder="e.g. Tacoma"
                                     value={model}
                                     onChange={(e) => setModel(e.target.value)}
-                                    className="w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                                    className={`w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition ${inputTextClass}`}
                                 />
                             </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <div>
                                 <label
                                     htmlFor="minYear"
-                                    className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
+                                    className="flex justify-between text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
                                 >
-                                    Min Year
+                                    <span>Min Year</span>
+                                    <span className="text-slate-900 normal-case">{minYear}</span>
                                 </label>
                                 <input
                                     id="minYear"
-                                    type="number"
-                                    placeholder="e.g. 2018"
+                                    type="range"
+                                    min={YEAR_MIN}
+                                    max={YEAR_MAX}
+                                    step={1}
                                     value={minYear}
-                                    onChange={(e) => setMinYear(e.target.value)}
-                                    className="w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                                    onChange={(e) => setMinYear(Number(e.target.value))}
+                                    className="w-full accent-blue-600"
                                 />
+                                <div className="flex justify-between text-xs text-slate-400 mt-1">
+                                    <span>{YEAR_MIN}</span>
+                                    <span>{YEAR_MAX}</span>
+                                </div>
                             </div>
                             <div>
                                 <label
                                     htmlFor="maxMileage"
-                                    className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
+                                    className="flex justify-between text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
                                 >
-                                    Max Mileage
+                                    <span>Max Mileage</span>
+                                    <span className="text-slate-900 normal-case">
+                                        {maxMileage.toLocaleString()} mi
+                                    </span>
                                 </label>
                                 <input
                                     id="maxMileage"
-                                    type="number"
-                                    placeholder="e.g. 60000"
+                                    type="range"
+                                    min={0}
+                                    max={MILEAGE_MAX}
+                                    step={5000}
                                     value={maxMileage}
-                                    onChange={(e) => setMaxMileage(e.target.value)}
-                                    className="w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                                    onChange={(e) => setMaxMileage(Number(e.target.value))}
+                                    className="w-full accent-blue-600"
                                 />
+                                <div className="flex justify-between text-xs text-slate-400 mt-1">
+                                    <span>0</span>
+                                    <span>{MILEAGE_MAX.toLocaleString()}</span>
+                                </div>
                             </div>
                             <div>
                                 <label
                                     htmlFor="maxPrice"
-                                    className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
+                                    className="flex justify-between text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
                                 >
-                                    Max Price
+                                    <span>Max Price</span>
+                                    <span className="text-slate-900 normal-case">
+                                        ${maxPrice.toLocaleString()}
+                                    </span>
                                 </label>
                                 <input
                                     id="maxPrice"
-                                    type="number"
-                                    placeholder="$"
+                                    type="range"
+                                    min={0}
+                                    max={PRICE_MAX}
+                                    step={1000}
                                     value={maxPrice}
-                                    onChange={(e) => setMaxPrice(e.target.value)}
-                                    className="w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                                    onChange={(e) => setMaxPrice(Number(e.target.value))}
+                                    className="w-full accent-blue-600"
                                 />
+                                <div className="flex justify-between text-xs text-slate-400 mt-1">
+                                    <span>$0</span>
+                                    <span>${PRICE_MAX.toLocaleString()}</span>
+                                </div>
                             </div>
                         </div>
+
                         <div className="flex justify-end">
                             <button
                                 type="submit"
@@ -332,7 +368,7 @@ export default function Home() {
                             placeholder="Name this search (e.g. Lexus ES)"
                             value={searchName}
                             onChange={(e) => setSearchName(e.target.value)}
-                            className="flex-1 md:w-56 border border-blue-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                            className={`flex-1 md:w-56 border border-blue-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm ${inputTextClass}`}
                         />
                         <input
                             type="email"
@@ -340,7 +376,7 @@ export default function Home() {
                             placeholder="Enter your email"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
-                            className="flex-1 md:w-64 border border-blue-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                            className={`flex-1 md:w-64 border border-blue-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm ${inputTextClass}`}
                         />
                         <button
                             type="submit"
