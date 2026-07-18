@@ -10,6 +10,8 @@ export default function Home() {
     // --- Filter State ---
     const [make, setMake] = useState("");
     const [model, setModel] = useState("");
+    const [minYear, setMinYear] = useState("");
+    const [maxMileage, setMaxMileage] = useState("");
     const [maxPrice, setMaxPrice] = useState("");
 
     // --- Data State ---
@@ -18,6 +20,7 @@ export default function Home() {
     const [error, setError] = useState<string | null>(null);
 
     // --- Save Search State ---
+    const [searchName, setSearchName] = useState("");
     const [email, setEmail] = useState("");
     const [saveStatus, setSaveStatus] = useState<
         "idle" | "loading" | "success" | "error"
@@ -37,6 +40,8 @@ export default function Home() {
 
             if (make.trim()) query = query.ilike("make", `%${make.trim()}%`);
             if (model.trim()) query = query.ilike("model", `%${model.trim()}%`);
+            if (minYear.trim()) query = query.gte("model_year", parseInt(minYear));
+            if (maxMileage.trim()) query = query.lte("mileage", parseInt(maxMileage));
             if (maxPrice.trim()) query = query.lte("price", parseInt(maxPrice));
 
             const { data, error: fetchError } = await query.limit(50);
@@ -48,7 +53,7 @@ export default function Home() {
         } finally {
             setLoading(false);
         }
-    }, [make, model, maxPrice, supabase]);
+    }, [make, model, minYear, maxMileage, maxPrice, supabase]);
 
     useEffect(() => {
         fetchListings();
@@ -63,6 +68,8 @@ export default function Home() {
     const handleClearFilters = () => {
         setMake("");
         setModel("");
+        setMinYear("");
+        setMaxMileage("");
         setMaxPrice("");
     };
 
@@ -76,9 +83,12 @@ export default function Home() {
         setSaveStatus("loading");
 
         const { error } = await supabase.from("saved_searches").insert({
+            name: searchName.trim() || null,
             email: email.trim(),
             make: make.trim() || null,
             model: model.trim() || null,
+            min_year: minYear ? parseInt(minYear) : null,
+            max_mileage: maxMileage ? parseInt(maxMileage) : null,
             max_price: maxPrice ? parseInt(maxPrice) : null,
         });
 
@@ -88,7 +98,7 @@ export default function Home() {
             setTimeout(() => setSaveStatus("idle"), 3000);
         } else {
             setSaveStatus("success");
-            setEmail("");
+            setSearchName("");
             setTimeout(() => setSaveStatus("idle"), 3000);
         }
     };
@@ -207,59 +217,90 @@ export default function Home() {
 
                 {/* Search & Filter Card */}
                 <section className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
-                    <form
-                        onSubmit={handleSearch}
-                        className="flex flex-col md:flex-row gap-4"
-                    >
-                        <div className="flex-1">
-                            <label
-                                htmlFor="make"
-                                className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
-                            >
-                                Make
-                            </label>
-                            <input
-                                id="make"
-                                type="text"
-                                placeholder="e.g. Toyota"
-                                value={make}
-                                onChange={(e) => setMake(e.target.value)}
-                                className="w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-                            />
+                    <form onSubmit={handleSearch} className="space-y-4">
+                        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                            <div>
+                                <label
+                                    htmlFor="make"
+                                    className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
+                                >
+                                    Make
+                                </label>
+                                <input
+                                    id="make"
+                                    type="text"
+                                    placeholder="e.g. Toyota"
+                                    value={make}
+                                    onChange={(e) => setMake(e.target.value)}
+                                    className="w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                                />
+                            </div>
+                            <div>
+                                <label
+                                    htmlFor="model"
+                                    className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
+                                >
+                                    Model
+                                </label>
+                                <input
+                                    id="model"
+                                    type="text"
+                                    placeholder="e.g. Tacoma"
+                                    value={model}
+                                    onChange={(e) => setModel(e.target.value)}
+                                    className="w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                                />
+                            </div>
+                            <div>
+                                <label
+                                    htmlFor="minYear"
+                                    className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
+                                >
+                                    Min Year
+                                </label>
+                                <input
+                                    id="minYear"
+                                    type="number"
+                                    placeholder="e.g. 2018"
+                                    value={minYear}
+                                    onChange={(e) => setMinYear(e.target.value)}
+                                    className="w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                                />
+                            </div>
+                            <div>
+                                <label
+                                    htmlFor="maxMileage"
+                                    className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
+                                >
+                                    Max Mileage
+                                </label>
+                                <input
+                                    id="maxMileage"
+                                    type="number"
+                                    placeholder="e.g. 60000"
+                                    value={maxMileage}
+                                    onChange={(e) => setMaxMileage(e.target.value)}
+                                    className="w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                                />
+                            </div>
+                            <div>
+                                <label
+                                    htmlFor="maxPrice"
+                                    className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
+                                >
+                                    Max Price
+                                </label>
+                                <input
+                                    id="maxPrice"
+                                    type="number"
+                                    placeholder="$"
+                                    value={maxPrice}
+                                    onChange={(e) => setMaxPrice(e.target.value)}
+                                    className="w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                                />
+                            </div>
                         </div>
-                        <div className="flex-1">
-                            <label
-                                htmlFor="model"
-                                className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
-                            >
-                                Model
-                            </label>
-                            <input
-                                id="model"
-                                type="text"
-                                placeholder="e.g. Tacoma"
-                                value={model}
-                                onChange={(e) => setModel(e.target.value)}
-                                className="w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-                            />
-                        </div>
-                        <div className="flex-1">
-                            <label
-                                htmlFor="maxPrice"
-                                className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
-                            >
-                                Max Price
-                            </label>
-                            <input
-                                id="maxPrice"
-                                type="number"
-                                placeholder="$"
-                                value={maxPrice}
-                                onChange={(e) => setMaxPrice(e.target.value)}
-                                className="w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-                            />
-                        </div>
-                        <div className="flex items-end">
+                        <div className="flex justify-end">
                             <button
                                 type="submit"
                                 className="w-full md:w-auto bg-slate-900 text-white font-bold py-3 px-8 rounded-lg hover:bg-slate-800 transition shadow-sm"
@@ -284,8 +325,15 @@ export default function Home() {
 
                     <form
                         onSubmit={handleSaveSearch}
-                        className="flex w-full md:w-auto gap-3"
+                        className="flex flex-col md:flex-row w-full md:w-auto gap-3"
                     >
+                        <input
+                            type="text"
+                            placeholder="Name this search (e.g. Lexus ES)"
+                            value={searchName}
+                            onChange={(e) => setSearchName(e.target.value)}
+                            className="flex-1 md:w-56 border border-blue-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                        />
                         <input
                             type="email"
                             required
