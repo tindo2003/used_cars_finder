@@ -37,13 +37,18 @@ def get_supabase():
     return create_client(url, key)
 
 
-def run_scraper(dry_run=False, max_pages=None):
+def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1):
     supabase = None
     if not dry_run:
         supabase = get_supabase()
         print("Connected to Supabase.")
     else:
         print("--- RUNNING IN DRY RUN MODE (No DB connection) ---")
+
+    # Progress is logged at most once per log_interval_minutes instead of
+    # once per saved listing, to keep GitHub Actions logs readable.
+    progress = {"saved": 0, "last_log": time.monotonic()}
+    log_interval_seconds = log_interval_minutes * 60
 
     print(f"Fetching saved searches... {'(DRY RUN MODE)' if dry_run else ''}")
 
@@ -75,7 +80,7 @@ def run_scraper(dry_run=False, max_pages=None):
         options = ScrapeOptions(make=make, model=model, max_price=search.get("max_price"))
         for provider_func in active_marketplaces:
             cars_found = provider_func(options)
-            save_cars_to_db(cars_found, dry_run, supabase)
+            save_cars_to_db(cars_found, dry_run, supabase, progress, log_interval_seconds)
 
     # --- 2. Scrape Dealerships (Independently of user searches) ---
     # Dealerships have their own inventory; we scrape their full used list
@@ -92,21 +97,32 @@ def run_scraper(dry_run=False, max_pages=None):
 
         options = ScrapeOptions(max_pages=max_pages, city=dealer.get("city"))
         cars_found = scraper_func(dealer["url"], options)
-        save_cars_to_db(cars_found, dry_run, supabase)
+        save_cars_to_db(cars_found, dry_run, supabase, progress, log_interval_seconds)
+
+    print(f"Done. Saved {progress['saved']} listings total.")
 
 
-def save_cars_to_db(cars, dry_run, supabase):  # Added supabase as an argument
+def save_cars_to_db(cars, dry_run, supabase, progress, log_interval_seconds):
     for car in cars:
         if dry_run:
             print(
                 f"🔍 [DRY RUN] Would save: {car.get('make')} {car.get('model')} - ${car.get('price')}"
             )
-        else:
-            car["status"] = "active"
-            supabase.table("listings").upsert(car, on_conflict="original_url").execute()
-            print(
-                f"✅ Saved: {car.get('model_year')} {car.get('make')} - ${car.get('price')}"
-            )
+            continue
+
+        car["status"] = "active"
+        # VIN is the real stable identity for dealer-sourced cars (a
+        # listing's URL can drift over time, e.g. an edited trim name
+        # changes the slug); fall back to original_url for VIN-less
+        # sources like Craigslist.
+        conflict_key = "vin" if car.get("vin") else "original_url"
+        supabase.table("listings").upsert(car, on_conflict=conflict_key).execute()
+
+        progress["saved"] += 1
+        now = time.monotonic()
+        if now - progress["last_log"] >= log_interval_seconds:
+            print(f"✅ Saved {progress['saved']} listings so far...")
+            progress["last_log"] = now
 
 
 if __name__ == "__main__":
@@ -122,6 +138,16 @@ if __name__ == "__main__":
         default=None,
         help="Limit how many inventory pages each dealer scraper fetches (useful for quick tests)",
     )
+    parser.add_argument(
+        "--log-interval",
+        type=float,
+        default=1,
+        help="Minutes between progress log lines while saving listings (default: 1)",
+    )
     args = parser.parse_args()
 
-    run_scraper(dry_run=args.dry_run, max_pages=args.max_pages)
+    run_scraper(
+        dry_run=args.dry_run,
+        max_pages=args.max_pages,
+        log_interval_minutes=args.log_interval,
+    )
