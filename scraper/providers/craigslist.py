@@ -1,4 +1,5 @@
 import re
+import random
 import requests
 from bs4 import BeautifulSoup
 import time
@@ -28,7 +29,11 @@ def scrape(options: ScrapeOptions):
     search_url = f"https://sfbay.craigslist.org/search/cta?query={search_query}"
 
     res = requests.get(search_url, headers=headers)
+    if res.status_code in (403, 429):
+        print(f"Craigslist returned {res.status_code} (rate-limited/blocked) — backing off, skipping this run.")
+        return results
     if res.status_code != 200:
+        print(f"Craigslist returned unexpected status {res.status_code}, skipping.")
         return results
 
     soup = BeautifulSoup(res.text, "html.parser")
@@ -79,5 +84,7 @@ def scrape(options: ScrapeOptions):
         except Exception:
             pass
 
-    time.sleep(2)
+    # Jittered delay so repeated calls (once per saved search) don't hit
+    # Craigslist at a perfectly uniform cadence.
+    time.sleep(random.uniform(2, 4))
     return results

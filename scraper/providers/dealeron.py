@@ -186,8 +186,10 @@ def scrape(base_url, options: ScrapeOptions = None):
                     next_button.click(force=True)
                     # Wait for the network to idle after the click to ensure the new page loads
                     page.wait_for_load_state("networkidle")
-                    # Extra buffer for JS hydration
-                    page.wait_for_timeout(2000)
+                    # DealerOn's robots.txt sets "Crawl-delay: 10" (confirmed
+                    # on stevenscreektoyota.com and fremonthyundai.com) —
+                    # honor it between page fetches rather than hammering.
+                    page.wait_for_timeout(10000)
                 except Exception as e:
                     print(f"Could not click 'Next': {e}")
                     break

@@ -1,4 +1,5 @@
 import re
+import random
 import requests
 from bs4 import BeautifulSoup
 import time
@@ -28,7 +29,11 @@ def scrape(options: ScrapeOptions):
     search_url = f"https://www.ebay.com/sch/i.html?_nkw={search_query}+cars&_sacat=6001"
 
     res = requests.get(search_url, headers=headers)
+    if res.status_code in (403, 429):
+        print(f"eBay returned {res.status_code} (rate-limited/blocked) — backing off, skipping this run.")
+        return results
     if res.status_code != 200:
+        print(f"eBay returned unexpected status {res.status_code}, skipping.")
         return results
 
     soup = BeautifulSoup(res.text, "html.parser")
@@ -81,5 +86,5 @@ def scrape(options: ScrapeOptions):
         except Exception:
             pass
 
-    time.sleep(2)
+    time.sleep(random.uniform(2, 4))
     return results
