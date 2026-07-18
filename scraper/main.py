@@ -1,32 +1,36 @@
 import argparse
 from providers import craigslist, dealeron, dealerinspire
-from options import ScrapeOptions
 from db import get_supabase, DbClient
 from notifications import notify_matches, DEFAULT_TOP_N
+from runner import ScrapeRunner
 import time
-import random
 
 DEALERS = [
     # San Jose
-    {"url": "https://www.stevenscreektoyota.com", "platform": "dealeron", "city": "San Jose"},
-    {"url": "https://www.capitolhonda.com", "platform": "dealerinspire", "city": "San Jose"},
-    {"url": "https://www.capitolford.com", "platform": "dealerinspire", "city": "San Jose"},
-    {"url": "https://www.capitolchevysj.com", "platform": "dealerinspire", "city": "San Jose"},
-    {"url": "https://www.capitolhyundaisj.com", "platform": "dealerinspire", "city": "San Jose"},
+    {"url": "https://www.stevenscreektoyota.com", "platform": "dealeron", "city": "San Jose", "name": "Stevens Creek Toyota"},
+    {"url": "https://www.capitolhonda.com", "platform": "dealerinspire", "city": "San Jose", "name": "Capitol Honda"},
+    {"url": "https://www.capitolford.com", "platform": "dealerinspire", "city": "San Jose", "name": "Capitol Ford"},
+    {"url": "https://www.capitolchevysj.com", "platform": "dealerinspire", "city": "San Jose", "name": "Capitol Chevrolet"},
+    {"url": "https://www.capitolhyundaisj.com", "platform": "dealerinspire", "city": "San Jose", "name": "Capitol Hyundai"},
     # Santa Clara
-    {"url": "https://www.stevenscreekhyundai.com", "platform": "dealerinspire", "city": "Santa Clara"},
+    {"url": "https://www.stevenscreekhyundai.com", "platform": "dealerinspire", "city": "Santa Clara", "name": "Stevens Creek Hyundai"},
     # Sunnyvale
-    {"url": "https://www.sunnyvalehonda.com", "platform": "dealerinspire", "city": "Sunnyvale"},
+    {"url": "https://www.sunnyvalehonda.com", "platform": "dealerinspire", "city": "Sunnyvale", "name": "Sunnyvale Honda"},
     # Fremont / Newark
-    {"url": "https://www.chevroletoffremont.com", "platform": "dealeron", "city": "Fremont"},
-    {"url": "https://www.fremonthyundai.com", "platform": "dealeron", "city": "Fremont"},
-    {"url": "https://www.fremontcdjr.com", "platform": "dealerinspire", "city": "Newark"},
+    {"url": "https://www.chevroletoffremont.com", "platform": "dealeron", "city": "Fremont", "name": "Fremont Chevrolet"},
+    {"url": "https://www.fremonthyundai.com", "platform": "dealeron", "city": "Fremont", "name": "Fremont Hyundai"},
+    {"url": "https://www.fremontcdjr.com", "platform": "dealerinspire", "city": "Newark", "name": "Fremont Chrysler Dodge Jeep Ram"},
 ]
 
 DEALER_SCRAPERS = {
     "dealeron": dealeron.scrape,
     "dealerinspire": dealerinspire.scrape,
 }
+
+# eBay is intentionally excluded: its robots.txt explicitly disallows this
+# search pattern and prohibits automated access without permission. See
+# research/scraping-etiquette.md.
+ACTIVE_MARKETPLACES = [craigslist.scrape]
 
 
 def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1, notify_top_n=DEFAULT_TOP_N):
@@ -56,42 +60,8 @@ def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1, notify_to
         # Dummy data for dry run testing
         searches = [{"make": "Toyota", "model": "Camry", "max_price": 20000}]
 
-    # --- 1. Scrape Marketplaces based on Saved Searches ---
-    # eBay is intentionally excluded: its robots.txt explicitly disallows
-    # this search pattern and prohibits automated access without
-    # permission. See research/scraping-etiquette.md.
-    active_marketplaces = [craigslist.scrape]
-
-    for search in searches:
-        make = search.get("make") or ""
-        model = search.get("model") or ""
-
-        if not make and not model:
-            continue
-
-        print(f"\nEvaluating target: {make.capitalize()} {model.capitalize()}")
-
-        options = ScrapeOptions(make=make, model=model, max_price=search.get("max_price"))
-        for provider_func in active_marketplaces:
-            cars_found = provider_func(options)
-            db_client.bulk_save(cars_found, dry_run, progress, log_interval_seconds)
-
-    # --- 2. Scrape Dealerships (Independently of user searches) ---
-    # Dealerships have their own inventory; we scrape their full used list
-    for dealer in DEALERS:
-        scraper_func = DEALER_SCRAPERS.get(dealer["platform"])
-        if not scraper_func:
-            print(f"Unknown platform '{dealer['platform']}' for {dealer['url']}, skipping.")
-            continue
-
-        # Sleep before hitting a new dealership website
-        wait_time = random.uniform(5, 10)
-        print(f"Waiting {wait_time:.2f} seconds before next dealer...")
-        time.sleep(wait_time)
-
-        options = ScrapeOptions(max_pages=max_pages, city=dealer.get("city"))
-        cars_found = scraper_func(dealer["url"], options)
-        db_client.bulk_save(cars_found, dry_run, progress, log_interval_seconds)
+    runner = ScrapeRunner(db_client, DEALERS, DEALER_SCRAPERS, ACTIVE_MARKETPLACES)
+    runner.run(searches, dry_run, progress, log_interval_seconds, max_pages)
 
     print(f"Done. Saved {progress['saved']} listings total.")
 

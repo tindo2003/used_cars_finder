@@ -15,3 +15,4 @@ class ScrapeOptions:
     max_price: Optional[float] = None
     max_pages: Optional[int] = None
     city: Optional[str] = None
+    dealer_name: Optional[str] = None
