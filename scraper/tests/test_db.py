@@ -8,7 +8,12 @@ from tests.fakes import FakeSupabase
 
 
 def make_progress(last_log=None):
-    return {"saved": 0, "last_log": last_log if last_log is not None else time.monotonic()}
+    return {
+        "saved": 0,
+        "inserted": 0,
+        "updated": 0,
+        "last_log": last_log if last_log is not None else time.monotonic(),
+    }
 
 
 # --- get_conflict_key ---
@@ -160,6 +165,36 @@ def test_upsert_updates_in_place_on_conflict():
     assert rows[0]["price"] == 200
 
 
+def test_upsert_returns_true_when_inserting_a_new_row():
+    supabase = FakeSupabase()
+    db = DbClient(supabase)
+
+    inserted = db.upsert({"vin": "A", "dealer_name": "Capitol Honda", "original_url": "https://example.com/a"})
+
+    assert inserted is True
+
+
+def test_upsert_returns_false_when_updating_an_existing_row():
+    supabase = FakeSupabase(
+        initial_data={
+            "listings": [
+                {
+                    "id": "1",
+                    "vin": "A",
+                    "dealer_name": "Capitol Honda",
+                    "original_url": "https://example.com/a",
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                }
+            ]
+        }
+    )
+    db = DbClient(supabase)
+
+    inserted = db.upsert({"vin": "A", "dealer_name": "Capitol Honda", "original_url": "https://example.com/a"})
+
+    assert inserted is False
+
+
 def test_upsert_keeps_the_same_vin_from_a_different_dealer_as_a_separate_row():
     # Dealer groups can syndicate the same VIN across sister storefronts
     # (e.g. a trade-in shows up on both "Capitol Honda" and "Capitol
@@ -212,6 +247,35 @@ def test_bulk_save_increments_progress_for_every_car():
 
     assert progress["saved"] == 5
     assert len(supabase.table("listings").data) == 5
+
+
+def test_bulk_save_tracks_inserted_vs_updated_counts():
+    supabase = FakeSupabase(
+        initial_data={
+            "listings": [
+                {
+                    "id": "1",
+                    "vin": "ALREADY-THERE",
+                    "dealer_name": "Capitol Honda",
+                    "original_url": "https://example.com/existing",
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                }
+            ]
+        }
+    )
+    db = DbClient(supabase)
+    progress = make_progress()
+    cars = [
+        {"vin": "ALREADY-THERE", "dealer_name": "Capitol Honda", "original_url": "https://example.com/existing"},
+        {"vin": "BRAND-NEW-1", "dealer_name": "Capitol Honda", "original_url": "https://example.com/new-1"},
+        {"vin": "BRAND-NEW-2", "dealer_name": "Capitol Honda", "original_url": "https://example.com/new-2"},
+    ]
+
+    db.bulk_save(cars, dry_run=False, progress=progress, log_interval_seconds=9999)
+
+    assert progress["saved"] == 3
+    assert progress["inserted"] == 2
+    assert progress["updated"] == 1
 
 
 def test_bulk_save_throttles_progress_logging(capsys):

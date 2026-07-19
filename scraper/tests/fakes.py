@@ -103,6 +103,10 @@ class FakeQuery:
                 return FakeResult([existing])
             row = dict(self.payload)
             row.setdefault("id", f"generated-{next(_id_counter)}")
+            # Mimics a real created_at default now(): fired fresh on
+            # INSERT, at essentially the same moment as any last_seen_at
+            # the caller stamped into this same payload.
+            row.setdefault("created_at", row.get("last_seen_at"))
             self.table.data.append(row)
             return FakeResult([row])
 

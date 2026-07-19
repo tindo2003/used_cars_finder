@@ -45,7 +45,7 @@ def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1):
 
     # Progress is logged at most once per log_interval_minutes instead of
     # once per saved listing, to keep GitHub Actions logs readable.
-    progress = {"saved": 0, "last_log": time.monotonic()}
+    progress = {"saved": 0, "inserted": 0, "updated": 0, "last_log": time.monotonic()}
     log_interval_seconds = log_interval_minutes * 60
 
     print(f"Fetching saved searches... {'(DRY RUN MODE)' if dry_run else ''}")
@@ -64,10 +64,8 @@ def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1):
     runner.run(searches, dry_run, progress, log_interval_seconds, max_pages)
 
     print(
-        f"Done. Processed {progress['saved']} listings this run "
-        "(deduped on save via vin/original_url -- most are re-confirming "
-        "existing rows, not new ones; check the listings table directly "
-        "for the actual distinct row count)."
+        f"Done. Processed {progress['saved']} listings this run: "
+        f"{progress['inserted']} new, {progress['updated']} already existed (re-confirmed)."
     )
 
 
