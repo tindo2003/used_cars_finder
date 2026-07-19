@@ -1,4 +1,5 @@
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -7,7 +8,11 @@ from supabase import create_client
 
 from utils.timestamps import parse_timestamp
 
-ORIGINAL_URL_UNIQUE_CONSTRAINT = "listings_original_url_key"
+# Matches Postgres's own unique-violation detail text, e.g.
+# "Key (original_url)=(https://...) already exists." -- stable across
+# Postgres versions and independent of whatever the constraint itself
+# happens to be named (which could change in a future migration).
+_DUPLICATE_KEY_COLUMNS_PATTERN = re.compile(r"^Key \(([^)]+)\)=")
 
 # How close a returned row's created_at has to be to the last_seen_at we
 # just stamped to count as "this upsert inserted the row" rather than
@@ -61,8 +66,17 @@ def _row_was_inserted(last_seen_at, returned_row):
     return abs(stamped_at - created_at) < NEW_ROW_TOLERANCE
 
 
-def _is_original_url_conflict(error):
-    return error.code == "23505" and ORIGINAL_URL_UNIQUE_CONSTRAINT in (error.message or "")
+def _conflicting_columns(error):
+    """
+    The column name(s) a unique-violation (23505) error was raised for,
+    parsed from Postgres's own "Key (col)=(value) already exists" detail
+    text -- e.g. ["original_url"]. Empty for any other error or anything
+    unparseable, rather than guessing.
+    """
+    if error.code != "23505" or not error.details:
+        return []
+    match = _DUPLICATE_KEY_COLUMNS_PATTERN.match(error.details)
+    return [column.strip() for column in match.group(1).split(",")] if match else []
 
 
 class DbClient:
@@ -123,7 +137,7 @@ class DbClient:
         try:
             result = self._table().upsert(car, on_conflict=conflict_key).execute()
         except APIError as error:
-            if conflict_key != "original_url" and _is_original_url_conflict(error):
+            if conflict_key != "original_url" and "original_url" in _conflicting_columns(error):
                 # A dealer site's own inventory card can link straight to
                 # a DIFFERENT dealer's detail page for the same physical
                 # vehicle -- observed live: a Capitol Honda card linking

@@ -254,17 +254,53 @@ def test_upsert_skips_when_original_url_collides_with_a_different_dealers_row():
     assert rows[0]["dealer_name"] == "Fremont Chevrolet"
 
 
-def test_is_original_url_conflict_only_matches_the_specific_constraint():
-    from db import _is_original_url_conflict
+def test_conflicting_columns_parses_the_column_from_postgres_detail_text():
+    from db import _conflicting_columns
 
     class FakeError:
-        def __init__(self, code, message):
+        def __init__(self, code, details):
             self.code = code
-            self.message = message
+            self.details = details
 
-    assert _is_original_url_conflict(FakeError("23505", 'violates unique constraint "listings_original_url_key"'))
-    assert not _is_original_url_conflict(FakeError("23505", 'violates unique constraint "listings_vin_dealer_name_key"'))
-    assert not _is_original_url_conflict(FakeError("23503", 'violates unique constraint "listings_original_url_key"'))
+    assert _conflicting_columns(FakeError("23505", "Key (original_url)=(https://example.com/a) already exists.")) == [
+        "original_url"
+    ]
+
+
+def test_conflicting_columns_handles_a_composite_key():
+    from db import _conflicting_columns
+
+    class FakeError:
+        def __init__(self, code, details):
+            self.code = code
+            self.details = details
+
+    assert _conflicting_columns(FakeError("23505", "Key (vin, dealer_name)=(A, Capitol Honda) already exists.")) == [
+        "vin",
+        "dealer_name",
+    ]
+
+
+def test_conflicting_columns_empty_for_non_unique_violation_errors():
+    from db import _conflicting_columns
+
+    class FakeError:
+        def __init__(self, code, details):
+            self.code = code
+            self.details = details
+
+    assert _conflicting_columns(FakeError("23503", "Key (original_url)=(https://example.com/a) already exists.")) == []
+
+
+def test_conflicting_columns_empty_when_details_missing():
+    from db import _conflicting_columns
+
+    class FakeError:
+        def __init__(self, code, details):
+            self.code = code
+            self.details = details
+
+    assert _conflicting_columns(FakeError("23505", None)) == []
 
 
 # --- bulk_save ---
