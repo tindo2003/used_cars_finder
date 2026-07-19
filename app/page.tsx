@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { createClient } from "@/utils/supabase/client";
 import Image from "next/image";
 
@@ -58,6 +58,18 @@ const SORT_OPTIONS = [
     { value: "mileage_asc", label: "Lowest Mileage", column: "mileage", ascending: true },
 ] as const;
 
+// Dealer feeds aren't consistent about casing (e.g. "Toyota" vs
+// "TOYOTA" both appear in production) -- collapse those into one
+// option, keeping the first-seen casing as the display value.
+function dedupeCaseInsensitive(values: string[]): string[] {
+    const seen = new Map<string, string>();
+    for (const value of values) {
+        const key = value.toLowerCase();
+        if (!seen.has(key)) seen.set(key, value);
+    }
+    return Array.from(seen.values()).sort();
+}
+
 function describeSavedSearch(search: any) {
     const parts = [];
     if (search.make?.length) parts.push(search.make.join(", "));
@@ -97,12 +109,16 @@ function MultiSelectDropdown({
     onChange: (next: string[]) => void;
 }) {
     const [open, setOpen] = useState(false);
+    const [query, setQuery] = useState("");
 
     const toggleValue = (value: string) => {
         onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
     };
 
     const summary = selected.length === 0 ? `All ${label}s` : selected.join(", ");
+    const filteredOptions = query.trim()
+        ? options.filter((option) => option.toLowerCase().includes(query.trim().toLowerCase()))
+        : options;
 
     return (
         <div className="relative">
@@ -122,11 +138,19 @@ function MultiSelectDropdown({
                 {summary}
             </button>
             {open && (
-                <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-300 rounded-lg shadow-lg p-2 space-y-1">
-                    {options.length === 0 && (
-                        <p className="text-sm text-slate-400 px-2 py-1">No options yet</p>
+                <div className="absolute z-20 mt-1 w-full max-h-72 overflow-y-auto bg-white border border-slate-300 rounded-lg shadow-lg p-2 space-y-1">
+                    <input
+                        type="text"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        placeholder={`Search ${label.toLowerCase()}s...`}
+                        aria-label={`Search ${label}`}
+                        className={`w-full border border-slate-200 rounded p-2 mb-1 text-sm sticky top-0 bg-white ${inputTextClass}`}
+                    />
+                    {filteredOptions.length === 0 && (
+                        <p className="text-sm text-slate-400 px-2 py-1">No matches</p>
                     )}
-                    {options.map((option) => (
+                    {filteredOptions.map((option) => (
                         <label
                             key={option}
                             className="flex items-center gap-2 px-2 py-1 rounded hover:bg-slate-50 cursor-pointer text-sm text-slate-800"
@@ -151,8 +175,7 @@ export default function Home() {
     // --- Filter State ---
     const [make, setMake] = useState<string[]>([]);
     const [model, setModel] = useState<string[]>([]);
-    const [availableMakes, setAvailableMakes] = useState<string[]>([]);
-    const [availableModels, setAvailableModels] = useState<string[]>([]);
+    const [makeModelPairs, setMakeModelPairs] = useState<{ make: string; model: string }[]>([]);
     const [minYear, setMinYear] = useState(YEAR_MIN);
     const [maxMileage, setMaxMileage] = useState(MILEAGE_MAX);
     const [maxPrice, setMaxPrice] = useState(PRICE_MAX);
@@ -266,20 +289,46 @@ export default function Home() {
             .eq("status", "active");
 
         if (!fetchError && data) {
-            const makes = new Map<string, string>();
-            const models = new Map<string, string>();
-            for (const row of data as any[]) {
-                if (row.make && !makes.has(row.make.toLowerCase())) makes.set(row.make.toLowerCase(), row.make);
-                if (row.model && !models.has(row.model.toLowerCase())) models.set(row.model.toLowerCase(), row.model);
-            }
-            setAvailableMakes(Array.from(makes.values()).sort());
-            setAvailableModels(Array.from(models.values()).sort());
+            setMakeModelPairs(
+                (data as any[])
+                    .filter((row) => row.make && row.model)
+                    .map((row) => ({ make: row.make as string, model: row.model as string }))
+            );
         }
     }, [supabase]);
 
     useEffect(() => {
         fetchFilterOptions();
     }, [fetchFilterOptions]);
+
+    const availableMakes = useMemo(
+        () => dedupeCaseInsensitive(makeModelPairs.map((pair) => pair.make)),
+        [makeModelPairs]
+    );
+
+    // Only offer models that actually belong to one of the selected
+    // makes -- picking "Toyota" shouldn't leave "Civic" in the list.
+    // No makes selected means no narrowing (every model is an option).
+    const availableModels = useMemo(() => {
+        const selectedMakes = new Set(make.map((m) => m.toLowerCase()));
+        const relevantPairs =
+            selectedMakes.size > 0
+                ? makeModelPairs.filter((pair) => selectedMakes.has(pair.make.toLowerCase()))
+                : makeModelPairs;
+        return dedupeCaseInsensitive(relevantPairs.map((pair) => pair.model));
+    }, [makeModelPairs, make]);
+
+    // If narrowing (or changing) the make selection drops a previously
+    // selected model out of the now-relevant list, drop it from the
+    // filter too rather than leaving an invisible, no-longer-explained
+    // filter silently narrowing results.
+    useEffect(() => {
+        setModel((prev) => {
+            const stillAvailable = new Set(availableModels.map((m) => m.toLowerCase()));
+            const next = prev.filter((m) => stillAvailable.has(m.toLowerCase()));
+            return next.length === prev.length ? prev : next;
+        });
+    }, [availableModels]);
 
     const fetchMySavedSearches = useCallback(async () => {
         if (!user) {

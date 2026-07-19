@@ -281,6 +281,92 @@ describe("search filters", () => {
         });
     });
 
+    it("lets the customer type into the make dropdown to filter the checkbox list", async () => {
+        const user = userEvent.setup();
+        const fake = makeFakeSupabase({
+            listingsResult: {
+                data: [
+                    makeListing(),
+                    makeListing({ id: "listing-2", make: "Lexus", model: "ES" }),
+                    makeListing({ id: "listing-3", make: "Honda", model: "Civic" }),
+                ],
+                error: null,
+            },
+        });
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await user.click(screen.getByLabelText("Make"));
+        expect(screen.getByRole("checkbox", { name: "Toyota" })).toBeInTheDocument();
+        expect(screen.getByRole("checkbox", { name: "Honda" })).toBeInTheDocument();
+
+        await user.type(screen.getByRole("textbox", { name: "Search Make" }), "lex");
+
+        expect(screen.getByRole("checkbox", { name: "Lexus" })).toBeInTheDocument();
+        expect(screen.queryByRole("checkbox", { name: "Toyota" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("checkbox", { name: "Honda" })).not.toBeInTheDocument();
+    });
+
+    it("only offers models belonging to the selected make(s)", async () => {
+        const user = userEvent.setup();
+        const fake = makeFakeSupabase({
+            listingsResult: {
+                data: [
+                    makeListing(), // Toyota Camry
+                    makeListing({ id: "listing-2", make: "Lexus", model: "ES" }),
+                    makeListing({ id: "listing-3", make: "Honda", model: "Civic" }),
+                ],
+                error: null,
+            },
+        });
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        // Before picking a make, every model is available.
+        await user.click(screen.getByLabelText("Model"));
+        expect(screen.getByRole("checkbox", { name: "Camry" })).toBeInTheDocument();
+        expect(screen.getByRole("checkbox", { name: "Civic" })).toBeInTheDocument();
+        expect(screen.getByRole("checkbox", { name: "ES" })).toBeInTheDocument();
+        await user.click(screen.getByLabelText("Model")); // close
+
+        await user.click(screen.getByLabelText("Make"));
+        await user.click(screen.getByRole("checkbox", { name: "Toyota" }));
+
+        await user.click(screen.getByLabelText("Model"));
+        expect(screen.getByRole("checkbox", { name: "Camry" })).toBeInTheDocument();
+        expect(screen.queryByRole("checkbox", { name: "Civic" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("checkbox", { name: "ES" })).not.toBeInTheDocument();
+    });
+
+    it("drops a selected model that's no longer valid after the make selection narrows", async () => {
+        const user = userEvent.setup();
+        const fake = makeFakeSupabase({
+            listingsResult: {
+                data: [
+                    makeListing(), // Toyota Camry
+                    makeListing({ id: "listing-2", make: "Honda", model: "Civic" }),
+                ],
+                error: null,
+            },
+        });
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await user.click(screen.getByLabelText("Model"));
+        await user.click(screen.getByRole("checkbox", { name: "Civic" }));
+        expect(screen.getByLabelText("Model")).toHaveTextContent("Civic");
+
+        await user.click(screen.getByLabelText("Make"));
+        await user.click(screen.getByRole("checkbox", { name: "Toyota" }));
+
+        await waitFor(() => {
+            expect(screen.getByLabelText("Model")).toHaveTextContent("All Models");
+        });
+    });
+
     it("moving the sliders updates the displayed value and re-queries with the new bound", async () => {
         const fake = makeFakeSupabase();
         setFakeSupabase(fake);
