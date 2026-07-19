@@ -861,6 +861,27 @@ describe("my saved searches", () => {
         expect(fake.savedSearchesTable.select).toHaveBeenCalled();
     });
 
+    it("collapses and re-expands the saved searches list", async () => {
+        const user = userEvent.setup();
+        setFakeSupabase(
+            makeFakeSupabase({
+                authUser: LOGGED_IN_USER,
+                savedSearchesSelectResult: {
+                    data: [{ id: "search-1", name: "Lexus ES", email: "buyer@example.com" }],
+                    error: null,
+                },
+            })
+        );
+        render(<Home />);
+        await screen.findByText("Lexus ES");
+
+        await user.click(screen.getByRole("button", { name: /My Saved Searches/ }));
+        expect(screen.queryByText("Lexus ES")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: /My Saved Searches/ }));
+        expect(await screen.findByText("Lexus ES")).toBeInTheDocument();
+    });
+
     it("appends the new search to the list after a successful save", async () => {
         const user = userEvent.setup();
         setFakeSupabase(
@@ -1000,8 +1021,29 @@ describe("favorites", () => {
         );
         render(<Home />);
 
-        expect(await screen.findByText("My Favorites")).toBeInTheDocument();
+        expect(await screen.findByText(/My Favorites/)).toBeInTheDocument();
         expect(screen.getByText("2022 Honda Civic")).toBeInTheDocument();
+    });
+
+    it("collapses and re-expands the My Favorites section", async () => {
+        const user = userEvent.setup();
+        setFakeSupabase(
+            makeFakeSupabase({
+                authUser: LOGGED_IN_USER,
+                favoritesSelectResult: {
+                    data: [{ listings: makeListing({ id: "listing-2", make: "Honda", model: "Civic" }) }],
+                    error: null,
+                },
+            })
+        );
+        render(<Home />);
+        await screen.findByText("2022 Honda Civic");
+
+        await user.click(screen.getByRole("button", { name: /My Favorites/ }));
+        expect(screen.queryByText("2022 Honda Civic")).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: /My Favorites/ }));
+        expect(await screen.findByText("2022 Honda Civic")).toBeInTheDocument();
     });
 
     it("does not show a My Favorites section when there are none", async () => {

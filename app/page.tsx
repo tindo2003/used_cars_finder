@@ -197,10 +197,12 @@ export default function Home() {
     >("idle");
     const [notificationGrouping, setNotificationGrouping] = useState<"combined" | "make" | "model">("combined");
     const [mySavedSearches, setMySavedSearches] = useState<any[]>([]);
+    const [savedSearchesExpanded, setSavedSearchesExpanded] = useState(true);
 
     // --- Favorites State ---
     const [favoriteListingIds, setFavoriteListingIds] = useState<Set<string>>(new Set());
     const [myFavorites, setMyFavorites] = useState<any[]>([]);
+    const [favoritesExpanded, setFavoritesExpanded] = useState(true);
 
     // --- Auth State ---
     const [user, setUser] = useState<any>(null);
@@ -961,10 +963,21 @@ export default function Home() {
                 {/* My Saved Searches */}
                 {mySavedSearches.length > 0 && (
                     <section className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
-                        <h3 className="font-bold text-slate-900 text-lg mb-4">
-                            My Saved Searches
-                        </h3>
-                        <ul className="space-y-3">
+                        <button
+                            type="button"
+                            onClick={() => setSavedSearchesExpanded((prev) => !prev)}
+                            aria-expanded={savedSearchesExpanded}
+                            className="w-full flex items-center justify-between text-left"
+                        >
+                            <h3 className="font-bold text-slate-900 text-lg">
+                                My Saved Searches ({mySavedSearches.length})
+                            </h3>
+                            <span className="text-slate-400 text-sm font-medium whitespace-nowrap">
+                                {savedSearchesExpanded ? "Hide ▲" : "Show ▼"}
+                            </span>
+                        </button>
+                        {savedSearchesExpanded && (
+                        <ul className="space-y-3 mt-4">
                             {mySavedSearches.map((search) => (
                                 <li
                                     key={search.id}
@@ -988,18 +1001,31 @@ export default function Home() {
                                 </li>
                             ))}
                         </ul>
+                        )}
                     </section>
                 )}
 
                 {/* My Favorites */}
                 {myFavorites.length > 0 && (
                     <section className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
-                        <h3 className="font-bold text-slate-900 text-lg mb-4">
-                            My Favorites
-                        </h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <button
+                            type="button"
+                            onClick={() => setFavoritesExpanded((prev) => !prev)}
+                            aria-expanded={favoritesExpanded}
+                            className="w-full flex items-center justify-between text-left"
+                        >
+                            <h3 className="font-bold text-slate-900 text-lg">
+                                My Favorites ({myFavorites.length})
+                            </h3>
+                            <span className="text-slate-400 text-sm font-medium whitespace-nowrap">
+                                {favoritesExpanded ? "Hide ▲" : "Show ▼"}
+                            </span>
+                        </button>
+                        {favoritesExpanded && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-4">
                             {myFavorites.map((car) => renderCarCard(car))}
                         </div>
+                        )}
                     </section>
                 )}
 
