@@ -16,6 +16,7 @@ Was flagged independently by this doc (2026-07-18) and by external PRD review (2
 - [x] `deal_score`/`is_good_deal` persisted to `listings` (migration 005) via `update_deal_scores()`, run daily as part of `notify.py` — frontend reads the stored value instead of reimplementing the heuristic in TypeScript
 - [x] "Good Deal" badge on listing cards, showing the discount percentage — see Listings section below
 - [ ] Known limitation, not addressed: no trim-level distinction (e.g. a base F-150 and a Raptor both count as "F-150"), which can produce misleading scores for models with wide trim-driven price spreads
+- [ ] Known limitation, not addressed (user-flagged, 2026-07-20): no private-party vs. dealer distinction in the comparable pool — Craigslist listings are usually private-party and price meaningfully lower than dealer listings for a comparable car, so mixing them skews the median in either direction. Full detail: [deal-scoring-heuristic.md](./deal-scoring-heuristic.md).
 - Full Deal Score / Price History / Days on Market remain explicitly out of scope (per PRD section 8, Future Roadmap) — this was only ever a minimal signal, not the full roadmap item.
 
 ## Data ingestion (scraper) — mostly done
