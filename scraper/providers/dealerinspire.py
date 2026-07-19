@@ -2,6 +2,7 @@ from playwright.sync_api import sync_playwright
 import json
 
 from options import ScrapeOptions
+from pagination import page_did_not_advance
 
 
 def extract_vehicle_data(card, base_url, city=None, dealer_name=None):
@@ -106,15 +107,14 @@ def scrape(base_url, options: ScrapeOptions = None):
             cards = page.query_selector_all(".result-wrap")
 
             # Same guard as dealeron.py: a "Next" click can succeed without
-            # the page actually changing. If this page has the exact same
-            # vehicles as the previous one, stop instead of re-scraping the
-            # same cars up to max_pages times.
+            # the page actually changing. See pagination.page_did_not_advance
+            # for exactly what does (and doesn't) count as a stall.
             current_page_vins = frozenset(
                 vin
                 for card in cards
                 if (vin := json.loads(card.get_attribute("data-vehicle") or "{}").get("vin"))
             )
-            if previous_page_vins is not None and current_page_vins and current_page_vins == previous_page_vins:
+            if page_did_not_advance(current_page_vins, previous_page_vins):
                 print("Pagination did not advance (same vehicles as the previous page) -- stopping.")
                 break
             previous_page_vins = current_page_vins
