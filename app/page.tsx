@@ -27,6 +27,48 @@ function getSellerLabel(car: any) {
     return MARKETPLACE_LABELS[car.marketplace_source] ?? car.marketplace_source;
 }
 
+// There's no auth yet, so saved searches can't be tied to a logged-in
+// user. Instead we track which ones this browser created in
+// localStorage, purely so the same browser can list/delete them later
+// -- it's not a security boundary, just a client-side memory aid.
+const SAVED_SEARCH_IDS_KEY = "savedSearchIds";
+
+function getStoredSearchIds(): string[] {
+    if (typeof window === "undefined") return [];
+    try {
+        const raw = window.localStorage.getItem(SAVED_SEARCH_IDS_KEY);
+        return raw ? JSON.parse(raw) : [];
+    } catch {
+        return [];
+    }
+}
+
+function addStoredSearchId(id: string) {
+    const ids = getStoredSearchIds();
+    if (!ids.includes(id)) {
+        window.localStorage.setItem(SAVED_SEARCH_IDS_KEY, JSON.stringify([...ids, id]));
+    }
+}
+
+function removeStoredSearchId(id: string) {
+    const ids = getStoredSearchIds().filter((existingId) => existingId !== id);
+    window.localStorage.setItem(SAVED_SEARCH_IDS_KEY, JSON.stringify(ids));
+}
+
+function describeSavedSearch(search: any) {
+    const parts = [];
+    if (search.make) parts.push(search.make);
+    if (search.model) parts.push(search.model);
+    const vehicle = parts.length > 0 ? parts.join(" ") : "Any vehicle";
+
+    const filters = [];
+    if (search.min_year) filters.push(`${search.min_year}+`);
+    if (search.max_mileage) filters.push(`under ${search.max_mileage.toLocaleString()} mi`);
+    if (search.max_price) filters.push(`under $${search.max_price.toLocaleString()}`);
+
+    return filters.length > 0 ? `${vehicle} — ${filters.join(", ")}` : vehicle;
+}
+
 export default function Home() {
     const supabase = createClient();
 
@@ -48,6 +90,7 @@ export default function Home() {
     const [saveStatus, setSaveStatus] = useState<
         "idle" | "loading" | "success" | "error"
     >("idle");
+    const [mySavedSearches, setMySavedSearches] = useState<any[]>([]);
 
     // --- Core Logic ---
     const fetchListings = useCallback(async () => {
@@ -81,6 +124,25 @@ export default function Home() {
     useEffect(() => {
         fetchListings();
     }, [fetchListings]);
+
+    const fetchMySavedSearches = useCallback(async () => {
+        const ids = getStoredSearchIds();
+        if (ids.length === 0) {
+            setMySavedSearches([]);
+            return;
+        }
+        const { data, error: fetchError } = await supabase
+            .from("saved_searches")
+            .select("*")
+            .in("id", ids);
+        if (!fetchError) {
+            setMySavedSearches(data || []);
+        }
+    }, [supabase]);
+
+    useEffect(() => {
+        fetchMySavedSearches();
+    }, [fetchMySavedSearches]);
 
     // --- Handlers ---
     const handleSearch = (e: React.FormEvent) => {
@@ -120,15 +182,19 @@ export default function Home() {
 
         setSaveStatus("loading");
 
-        const { error } = await supabase.from("saved_searches").insert({
-            name: searchName.trim() || null,
-            email: email.trim(),
-            make: make.trim() || null,
-            model: model.trim() || null,
-            min_year: minYear > YEAR_MIN ? minYear : null,
-            max_mileage: maxMileage < MILEAGE_MAX ? maxMileage : null,
-            max_price: maxPrice < PRICE_MAX ? maxPrice : null,
-        });
+        const { data, error } = await supabase
+            .from("saved_searches")
+            .insert({
+                name: searchName.trim() || null,
+                email: email.trim(),
+                make: make.trim() || null,
+                model: model.trim() || null,
+                min_year: minYear > YEAR_MIN ? minYear : null,
+                max_mileage: maxMileage < MILEAGE_MAX ? maxMileage : null,
+                max_price: maxPrice < PRICE_MAX ? maxPrice : null,
+            })
+            .select()
+            .single();
 
         if (error) {
             console.error("Supabase Insert Error:", error);
@@ -137,8 +203,22 @@ export default function Home() {
         } else {
             setSaveStatus("success");
             setSearchName("");
+            if (data?.id) {
+                addStoredSearchId(data.id);
+                setMySavedSearches((prev) => [...prev, data]);
+            }
             setTimeout(() => setSaveStatus("idle"), 3000);
         }
+    };
+
+    const handleDeleteSavedSearch = async (id: string) => {
+        const { error } = await supabase.from("saved_searches").delete().eq("id", id);
+        if (error) {
+            console.error("Supabase Delete Error:", error);
+            return;
+        }
+        removeStoredSearchId(id);
+        setMySavedSearches((prev) => prev.filter((search) => search.id !== id));
     };
 
     // --- UI Components ---
@@ -432,6 +512,39 @@ export default function Home() {
                         </button>
                     </form>
                 </section>
+
+                {/* My Saved Searches (tracked in this browser only) */}
+                {mySavedSearches.length > 0 && (
+                    <section className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
+                        <h3 className="font-bold text-slate-900 text-lg mb-4">
+                            My Saved Searches
+                        </h3>
+                        <ul className="space-y-3">
+                            {mySavedSearches.map((search) => (
+                                <li
+                                    key={search.id}
+                                    className="flex items-center justify-between gap-4 p-3 border border-slate-200 rounded-lg"
+                                >
+                                    <div>
+                                        <p className="font-semibold text-slate-900">
+                                            {search.name || "Unnamed search"}
+                                        </p>
+                                        <p className="text-sm text-slate-500">
+                                            {describeSavedSearch(search)} — {search.email}
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={() => handleDeleteSavedSearch(search.id)}
+                                        aria-label={`Delete ${search.name || "Unnamed search"}`}
+                                        className="text-red-600 font-semibold text-sm hover:text-red-800 transition whitespace-nowrap"
+                                    >
+                                        Delete
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                    </section>
+                )}
 
                 {/* Results Grid */}
                 <section>{renderListings()}</section>

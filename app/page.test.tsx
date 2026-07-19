@@ -48,23 +48,51 @@ type SavedSearchPayload = {
 
 function makeFakeSupabase({
     listingsResult = { data: [makeListing()], error: null },
-    insertResult = { error: null },
+    insertResult = { data: { id: "search-1" }, error: null },
+    savedSearchesSelectResult = { data: [], error: null },
+    deleteResult = { error: null },
     onInsert,
+    onDelete,
 }: {
     listingsResult?: { data: unknown[]; error: unknown };
-    insertResult?: { error: unknown };
+    insertResult?: { data?: unknown; error: unknown };
+    savedSearchesSelectResult?: { data: unknown[]; error: unknown };
+    deleteResult?: { error: unknown };
     onInsert?: (payload: SavedSearchPayload) => void;
+    onDelete?: (id: unknown) => void;
 } = {}) {
-    const listingsQuery: any = {};
-    for (const method of ["select", "eq", "order", "ilike", "gte", "lte", "limit"]) {
-        listingsQuery[method] = vi.fn(() => listingsQuery);
+    function makeChainable(result: unknown, methods: string[]) {
+        const chain: any = {};
+        for (const method of methods) {
+            chain[method] = vi.fn(() => chain);
+        }
+        chain.then = (resolve: (value: unknown) => void) => resolve(result);
+        return chain;
     }
-    listingsQuery.then = (resolve: (value: unknown) => void) => resolve(listingsResult);
+
+    const listingsQuery = makeChainable(listingsResult, [
+        "select",
+        "eq",
+        "order",
+        "ilike",
+        "gte",
+        "lte",
+        "limit",
+    ]);
 
     const savedSearchesTable = {
         insert: vi.fn((payload: SavedSearchPayload) => {
             onInsert?.(payload);
-            return Promise.resolve(insertResult);
+            return makeChainable(insertResult, ["select", "single"]);
+        }),
+        select: vi.fn(() => makeChainable(savedSearchesSelectResult, ["in", "eq"])),
+        delete: vi.fn(() => {
+            const chain = makeChainable(deleteResult, []);
+            chain.eq = vi.fn((_column: string, value: unknown) => {
+                onDelete?.(value);
+                return chain;
+            });
+            return chain;
         }),
     };
 
@@ -78,6 +106,7 @@ function makeFakeSupabase({
 }
 
 beforeEach(() => {
+    window.localStorage.clear();
     setFakeSupabase(makeFakeSupabase());
 });
 
@@ -300,5 +329,87 @@ describe("save search", () => {
         await user.click(screen.getByRole("button", { name: "Save Search" }));
 
         expect(await screen.findByRole("button", { name: "Error" })).toBeInTheDocument();
+    });
+});
+
+describe("my saved searches", () => {
+    it("shows nothing when this browser hasn't saved any searches", async () => {
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        expect(screen.queryByText("My Saved Searches")).not.toBeInTheDocument();
+    });
+
+    it("lists a saved search fetched from Supabase for an id already in localStorage", async () => {
+        window.localStorage.setItem("savedSearchIds", JSON.stringify(["search-1"]));
+        setFakeSupabase(
+            makeFakeSupabase({
+                savedSearchesSelectResult: {
+                    data: [
+                        {
+                            id: "search-1",
+                            name: "Lexus ES",
+                            make: "Lexus",
+                            model: "ES",
+                            min_year: 2018,
+                            max_mileage: 60000,
+                            max_price: 30000,
+                            email: "buyer@example.com",
+                        },
+                    ],
+                    error: null,
+                },
+            })
+        );
+
+        render(<Home />);
+
+        expect(await screen.findByText("Lexus ES")).toBeInTheDocument();
+        expect(screen.getByText(/Lexus ES — 2018\+, under 60,000 mi, under \$30,000/)).toBeInTheDocument();
+    });
+
+    it("appends the new search to the list after a successful save", async () => {
+        const user = userEvent.setup();
+        setFakeSupabase(
+            makeFakeSupabase({
+                insertResult: {
+                    data: { id: "new-search", name: "Honda watch", make: "Honda", email: "buyer@example.com" },
+                    error: null,
+                },
+            })
+        );
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await user.type(screen.getByLabelText("Make"), "Honda");
+        await user.type(screen.getByPlaceholderText("Name this search (e.g. Lexus ES)"), "Honda watch");
+        await user.type(screen.getByPlaceholderText("Enter your email"), "buyer@example.com");
+        await user.click(screen.getByRole("button", { name: "Save Search" }));
+
+        expect(await screen.findByText("Honda watch")).toBeInTheDocument();
+        expect(JSON.parse(window.localStorage.getItem("savedSearchIds") || "[]")).toEqual(["new-search"]);
+    });
+
+    it("deletes a saved search from Supabase and removes it from the list", async () => {
+        window.localStorage.setItem("savedSearchIds", JSON.stringify(["search-1"]));
+        const onDelete = vi.fn();
+        setFakeSupabase(
+            makeFakeSupabase({
+                savedSearchesSelectResult: {
+                    data: [{ id: "search-1", name: "Lexus ES", email: "buyer@example.com" }],
+                    error: null,
+                },
+                onDelete,
+            })
+        );
+        const user = userEvent.setup();
+        render(<Home />);
+        await screen.findByText("Lexus ES");
+
+        await user.click(screen.getByRole("button", { name: "Delete Lexus ES" }));
+
+        await waitFor(() => expect(onDelete).toHaveBeenCalledWith("search-1"));
+        expect(screen.queryByText("Lexus ES")).not.toBeInTheDocument();
+        expect(JSON.parse(window.localStorage.getItem("savedSearchIds") || "[]")).toEqual([]);
     });
 });
