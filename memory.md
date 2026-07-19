@@ -65,7 +65,7 @@ Run tests: `cd scraper && python3 -m pytest tests/ -q` (backend) and `npx vitest
 
 ## Known open items (not yet decided or built)
 
-See `research/mvp-checklist.md`'s "Suggested build order" for the live, prioritized list. As of this writing, next up: **notification gaps** (updated-listing/price-drop re-triggering, per-user preferences/unsubscribe). Also open: saved-search edit/enable-disable, multi-make search (`make` is single-value today on both the search filter and `saved_searches`), several PRD filters (transmission, seller type, radius search -- blocked on geocoding), a listing detail page, additional dealer coverage. All migrations through 011 have been run in Supabase.
+See `research/mvp-checklist.md`'s "Suggested build order" for the live, prioritized list. As of this writing, next up: **notification gaps** (updated-listing/price-drop re-triggering, per-user preferences/unsubscribe). Also open: saved-search edit/enable-disable, multi-make/multi-model search (`make`/`model` are single-value today on both the search filter and `saved_searches`), several PRD filters (transmission, seller type, radius search -- blocked on geocoding), a listing detail page, additional dealer coverage. All migrations through 011 have been run in Supabase.
 
 ## Where to look for more
 
