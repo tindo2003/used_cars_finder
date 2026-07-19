@@ -62,7 +62,12 @@ def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1):
     runner = ScrapeRunner(db_client, DEALERS, DEALER_SCRAPERS, ACTIVE_MARKETPLACES)
     runner.run(searches, dry_run, progress, log_interval_seconds, max_pages)
 
-    print(f"Done. Saved {progress['saved']} listings total.")
+    print(
+        f"Done. Processed {progress['saved']} listings this run "
+        "(deduped on save via vin/original_url -- most are re-confirming "
+        "existing rows, not new ones; check the listings table directly "
+        "for the actual distinct row count)."
+    )
 
 
 if __name__ == "__main__":

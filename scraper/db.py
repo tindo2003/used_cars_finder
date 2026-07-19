@@ -78,8 +78,13 @@ class DbClient:
 
             self.upsert(car)
 
+            # Every car scraped gets upserted (deduped on vin/original_url,
+            # see get_conflict_key), so this counts records processed this
+            # run, not distinct rows in the table -- most of them are
+            # re-confirming a listing that's already there, not inserting a
+            # new one.
             progress["saved"] += 1
             now = time.monotonic()
             if now - progress["last_log"] >= log_interval_seconds:
-                print(f"✅ Saved {progress['saved']} listings so far...")
+                print(f"✅ Processed {progress['saved']} listings so far (deduped on save)...")
                 progress["last_log"] = now

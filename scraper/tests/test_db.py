@@ -175,7 +175,7 @@ def test_bulk_save_throttles_progress_logging(capsys):
 
     db.bulk_save(cars, dry_run=False, progress=progress, log_interval_seconds=9999)
 
-    saved_logs = [line for line in capsys.readouterr().out.splitlines() if "Saved" in line]
+    saved_logs = [line for line in capsys.readouterr().out.splitlines() if "Processed" in line]
     # Only the first car should trigger a log line; the rest fall inside
     # the 9999s interval window and should be suppressed.
     assert len(saved_logs) == 1
