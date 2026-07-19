@@ -127,6 +127,33 @@ def extract_vehicle_data(
         return None
 
 
+def _scroll_until_stable(page: Any, max_attempts: int = 20) -> None:
+    """
+    Some DealerOn sites (confirmed live: Lexus Stevens Creek) render
+    the vehicle-card grid virtualized -- cards for the CURRENT page
+    mount progressively as you scroll, from data the site already
+    fetched in one API call, not via additional page/network requests.
+    A single DOM snapshot right after `networkidle` only captures
+    whatever happened to render first (as few as 4 of a real 56 on that
+    dealer, confirmed by live inspection), even though upping the
+    display-count (see the "Show 96" click above) makes the site
+    correctly report "no more pages" once everything nominally fits on
+    one page -- so the old code silently under-scraped without ever
+    detecting anything was wrong. Scrolling to the bottom repeatedly
+    (bounded by max_attempts) until the rendered count stops growing
+    fixes this for virtualized sites, and costs one cheap no-op
+    scroll+wait on sites that already render everything up front.
+    """
+    previous_count = page.evaluate("document.querySelectorAll('.vehicle-card').length")
+    for _ in range(max_attempts):
+        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        page.wait_for_timeout(500)
+        current_count = page.evaluate("document.querySelectorAll('.vehicle-card').length")
+        if current_count == previous_count:
+            break
+        previous_count = current_count
+
+
 def scrape(base_url: str, options: Optional[ScrapeOptions] = None) -> List[Dict[str, Any]]:
     options = options or ScrapeOptions()
     max_pages = options.max_pages or 300
@@ -182,6 +209,8 @@ def scrape(base_url: str, options: Optional[ScrapeOptions] = None) -> List[Dict[
                 const overlays = document.querySelectorAll('#ca-consent-root, #podium-website-widget, .headerWrapper');
                 overlays.forEach(el => el.style.display = 'none');
             """)
+
+            _scroll_until_stable(page)
 
             # Parse the current page
             html = page.content()
