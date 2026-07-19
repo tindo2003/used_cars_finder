@@ -116,6 +116,7 @@ export default function Home() {
                 .from("listings")
                 .select("*")
                 .eq("status", "active")
+                .is("duplicate_of", null)
                 .order(sortOption.column, { ascending: sortOption.ascending, nullsFirst: false });
 
             if (make.trim()) query = query.ilike("make", `%${make.trim()}%`);

@@ -17,8 +17,21 @@ def get_conflict_key(car):
     VIN is the real stable identity for dealer-sourced cars (a listing's
     URL can drift over time, e.g. an edited trim name changes the slug);
     fall back to original_url for VIN-less sources like Craigslist.
+
+    Conflict target is (vin, dealer_name), not vin alone: dealer groups
+    often syndicate the same physical vehicle's VIN across multiple
+    storefronts they own (e.g. a trade-in shows up on both "Nissan San
+    Jose" and sister store "Honda Fremont"). Upserting on bare vin would
+    make the second store's scrape silently overwrite the first store's
+    dealer_name/city/original_url in place -- one row that flip-flops
+    location with no visible duplicate and no history of the swap.
+    Keying on the pair keeps each storefront's listing as its own row
+    (still collapsing repeat scrapes of the *same* dealer's listing, the
+    original bug this fixed -- see migration 001), so the cross-listing
+    case becomes visible and gets flagged by duplicates.py instead of
+    disappearing silently.
     """
-    return "vin" if car.get("vin") else "original_url"
+    return "vin,dealer_name" if car.get("vin") else "original_url"
 
 
 class DbClient:
@@ -60,9 +73,9 @@ class DbClient:
 
     def upsert(self, car):
         """
-        Insert or update a listing, deduping on vin (dealer sources) or
-        original_url (VIN-less sources like Craigslist) — see
-        get_conflict_key().
+        Insert or update a listing, deduping on (vin, dealer_name)
+        (dealer sources) or original_url (VIN-less sources like
+        Craigslist) — see get_conflict_key().
         """
         car = dict(car, status="active")
         conflict_key = get_conflict_key(car)

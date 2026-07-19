@@ -108,6 +108,10 @@ def notify_matches(supabase, send_email_fn=None, top_n=DEFAULT_TOP_N):
     in notification_history, the next run naturally surfaces the
     next-best deals once the current top_n have been seen.
 
+    Listings flagged as a cross-marketplace duplicate (duplicate_of set,
+    see duplicates.update_duplicate_flags) are excluded so the same
+    physical vehicle never gets emailed twice under two different rows.
+
     Returns the number of emails sent (not the number of listings).
     """
     send_email_fn = send_email_fn or send_digest_email
@@ -117,7 +121,7 @@ def notify_matches(supabase, send_email_fn=None, top_n=DEFAULT_TOP_N):
     history_db = DbClient(supabase, table="notification_history")
 
     searches = [s for s in searches_db.read(is_active=True) if s.get("email")]
-    listings = listings_db.read(status="active")
+    listings = [listing for listing in listings_db.read(status="active") if not listing.get("duplicate_of")]
     already_notified = {
         (row["saved_search_id"], row["listing_id"]) for row in history_db.read()
     }

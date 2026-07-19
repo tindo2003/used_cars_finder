@@ -2,6 +2,7 @@ import argparse
 
 from db import get_supabase
 from deals import update_deal_scores
+from duplicates import update_duplicate_flags
 from notifications import DEFAULT_TOP_N, notify_matches
 
 if __name__ == "__main__":
@@ -18,6 +19,9 @@ if __name__ == "__main__":
 
     supabase = get_supabase()
     print("Connected to Supabase.")
+
+    duplicates = update_duplicate_flags(supabase)
+    print(f"Updated duplicate flags; {duplicates} listings flagged as cross-marketplace duplicates.")
 
     good_deals = update_deal_scores(supabase)
     print(f"Updated deal scores; {good_deals} listings currently flagged as good deals.")

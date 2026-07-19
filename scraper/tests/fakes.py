@@ -89,8 +89,13 @@ class FakeQuery:
             return FakeResult(rows)
 
         if self.op == "upsert":
+            conflict_columns = self.on_conflict.split(",")
             existing = next(
-                (row for row in self.table.data if row.get(self.on_conflict) == self.payload.get(self.on_conflict)),
+                (
+                    row
+                    for row in self.table.data
+                    if all(row.get(col) == self.payload.get(col) for col in conflict_columns)
+                ),
                 None,
             )
             if existing is not None:

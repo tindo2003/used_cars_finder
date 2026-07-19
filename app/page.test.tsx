@@ -73,6 +73,7 @@ function makeFakeSupabase({
     const listingsQuery = makeChainable(listingsResult, [
         "select",
         "eq",
+        "is",
         "order",
         "ilike",
         "gte",

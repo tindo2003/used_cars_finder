@@ -13,8 +13,8 @@ def make_progress(last_log=None):
 # --- get_conflict_key ---
 
 
-def test_get_conflict_key_prefers_vin_when_present():
-    assert get_conflict_key({"vin": "1HGCR2F81DA008735"}) == "vin"
+def test_get_conflict_key_prefers_vin_and_dealer_name_when_present():
+    assert get_conflict_key({"vin": "1HGCR2F81DA008735", "dealer_name": "Capitol Honda"}) == "vin,dealer_name"
 
 
 def test_get_conflict_key_falls_back_to_original_url_when_vin_missing():
@@ -91,15 +91,15 @@ def test_delete_removes_rows_matching_filters():
 # --- upsert ---
 
 
-def test_upsert_uses_vin_as_conflict_key_when_present():
+def test_upsert_uses_vin_and_dealer_name_as_conflict_key_when_present():
     supabase = FakeSupabase()
     db = DbClient(supabase)
 
-    db.upsert({"vin": "A", "original_url": "https://example.com/a"})
+    db.upsert({"vin": "A", "dealer_name": "Capitol Honda", "original_url": "https://example.com/a"})
 
     call = supabase.table("listings").calls[0]
     assert call["op"] == "upsert"
-    assert call["on_conflict"] == "vin"
+    assert call["on_conflict"] == "vin,dealer_name"
     assert call["payload"]["status"] == "active"
 
 
@@ -123,15 +123,49 @@ def test_upsert_does_not_mutate_the_caller_dict():
 
 
 def test_upsert_updates_in_place_on_conflict():
-    supabase = FakeSupabase(initial_data={"listings": [{"id": "1", "vin": "A", "original_url": "https://example.com/a", "price": 100}]})
+    supabase = FakeSupabase(
+        initial_data={
+            "listings": [
+                {
+                    "id": "1",
+                    "vin": "A",
+                    "dealer_name": "Capitol Honda",
+                    "original_url": "https://example.com/a",
+                    "price": 100,
+                }
+            ]
+        }
+    )
     db = DbClient(supabase)
 
-    db.upsert({"vin": "A", "original_url": "https://example.com/b", "price": 200})
+    db.upsert({"vin": "A", "dealer_name": "Capitol Honda", "original_url": "https://example.com/b", "price": 200})
 
     rows = supabase.table("listings").data
     assert len(rows) == 1
     assert rows[0]["original_url"] == "https://example.com/b"
     assert rows[0]["price"] == 200
+
+
+def test_upsert_keeps_the_same_vin_from_a_different_dealer_as_a_separate_row():
+    # Dealer groups can syndicate the same VIN across sister storefronts
+    # (e.g. a trade-in shows up on both "Capitol Honda" and "Capitol
+    # Ford"). Conflicting on vin alone would silently overwrite the first
+    # store's row with the second's; keying on (vin, dealer_name) keeps
+    # both visible so duplicates.py can flag them explicitly instead.
+    supabase = FakeSupabase(
+        initial_data={
+            "listings": [
+                {"id": "1", "vin": "A", "dealer_name": "Capitol Honda", "original_url": "https://honda.example/a"}
+            ]
+        }
+    )
+    db = DbClient(supabase)
+
+    db.upsert({"vin": "A", "dealer_name": "Capitol Ford", "original_url": "https://ford.example/a"})
+
+    rows = supabase.table("listings").data
+    assert len(rows) == 2
+    assert {row["dealer_name"] for row in rows} == {"Capitol Honda", "Capitol Ford"}
 
 
 # --- bulk_save ---
