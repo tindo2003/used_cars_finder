@@ -80,6 +80,7 @@ function makeFakeSupabase({
     // assert a second batch actually gets appended, not re-fetched.
     loadMoreResult = { data: [] as unknown[], error: null },
     insertResult = { data: { id: "search-1" }, error: null },
+    updateResult = { data: null as unknown, error: null as unknown },
     savedSearchesSelectResult = { data: [], error: null },
     deleteResult = { error: null },
     favoritesSelectResult = { data: [] as { listings: unknown }[], error: null },
@@ -89,6 +90,7 @@ function makeFakeSupabase({
     signInResult = { error: null as { message: string } | null },
     signUpResult = { error: null as { message: string } | null },
     onInsert,
+    onUpdate,
     onDelete,
     onFavoriteInsert,
     onFavoriteDelete,
@@ -97,6 +99,7 @@ function makeFakeSupabase({
     filterOptionsResult?: { data: unknown[]; error: unknown };
     loadMoreResult?: { data: unknown[]; error: unknown };
     insertResult?: { data?: unknown; error: unknown };
+    updateResult?: { data?: unknown; error: unknown };
     savedSearchesSelectResult?: { data: unknown[]; error: unknown };
     deleteResult?: { error: unknown };
     favoritesSelectResult?: { data: { listings: unknown }[]; error: unknown };
@@ -106,6 +109,7 @@ function makeFakeSupabase({
     signInResult?: { error: { message: string } | null };
     signUpResult?: { error: { message: string } | null };
     onInsert?: (payload: SavedSearchPayload) => void;
+    onUpdate?: (id: unknown, payload: Record<string, unknown>) => void;
     onDelete?: (id: unknown) => void;
     onFavoriteInsert?: (payload: { user_id: string; listing_id: string }) => void;
     onFavoriteDelete?: (userId: unknown, listingId: unknown) => void;
@@ -143,6 +147,14 @@ function makeFakeSupabase({
         insert: vi.fn((payload: SavedSearchPayload) => {
             onInsert?.(payload);
             return makeChainable(insertResult, ["select", "single"]);
+        }),
+        update: vi.fn((payload: Record<string, unknown>) => {
+            const chain: any = {};
+            chain.eq = vi.fn((_column: string, id: unknown) => {
+                onUpdate?.(id, payload);
+                return makeChainable(updateResult, ["select", "single"]);
+            });
+            return chain;
         }),
         select: vi.fn(() => makeChainable(savedSearchesSelectResult, ["in", "eq"])),
         delete: vi.fn(() => {
@@ -951,6 +963,90 @@ describe("my saved searches", () => {
 
         await waitFor(() => expect(onDelete).toHaveBeenCalledWith("search-1"));
         expect(screen.queryByText("Lexus ES")).not.toBeInTheDocument();
+    });
+
+    it("clicking Edit loads the search's filters into the main form and submits an update", async () => {
+        const user = userEvent.setup();
+        const onUpdate = vi.fn();
+        setFakeSupabase(
+            makeFakeSupabase({
+                authUser: LOGGED_IN_USER,
+                savedSearchesSelectResult: {
+                    data: [
+                        {
+                            id: "search-1",
+                            name: "Lexus ES",
+                            email: "buyer@example.com",
+                            make: ["Lexus"],
+                            model: ["ES"],
+                            notification_grouping: "combined",
+                        },
+                    ],
+                    error: null,
+                },
+                updateResult: { data: { id: "search-1", name: "Lexus ES Updated" }, error: null },
+                onUpdate,
+            })
+        );
+        render(<Home />);
+        await screen.findByText("Lexus ES");
+
+        await user.click(screen.getByRole("button", { name: "Edit Lexus ES" }));
+
+        expect(screen.getByPlaceholderText("Name this search (e.g. Lexus ES)")).toHaveValue("Lexus ES");
+        expect(screen.getByPlaceholderText("Enter your email")).toHaveValue("buyer@example.com");
+        expect(screen.getByRole("button", { name: "Update Search" })).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Update Search" }));
+
+        await waitFor(() => expect(onUpdate).toHaveBeenCalledWith("search-1", expect.objectContaining({ name: "Lexus ES" })));
+        expect(await screen.findByText("Lexus ES Updated")).toBeInTheDocument();
+    });
+
+    it("clicking Cancel while editing clears the form and returns to Save Search", async () => {
+        const user = userEvent.setup();
+        setFakeSupabase(
+            makeFakeSupabase({
+                authUser: LOGGED_IN_USER,
+                savedSearchesSelectResult: {
+                    data: [{ id: "search-1", name: "Lexus ES", email: "buyer@example.com" }],
+                    error: null,
+                },
+            })
+        );
+        render(<Home />);
+        await screen.findByText("Lexus ES");
+
+        await user.click(screen.getByRole("button", { name: "Edit Lexus ES" }));
+        expect(screen.getByRole("button", { name: "Update Search" })).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+        expect(screen.getByRole("button", { name: "Save Search" })).toBeInTheDocument();
+        expect(screen.getByPlaceholderText("Name this search (e.g. Lexus ES)")).toHaveValue("");
+    });
+
+    it("pausing a saved search updates is_active and shows a Paused label", async () => {
+        const user = userEvent.setup();
+        const onUpdate = vi.fn();
+        setFakeSupabase(
+            makeFakeSupabase({
+                authUser: LOGGED_IN_USER,
+                savedSearchesSelectResult: {
+                    data: [{ id: "search-1", name: "Lexus ES", email: "buyer@example.com", is_active: true }],
+                    error: null,
+                },
+                onUpdate,
+            })
+        );
+        render(<Home />);
+        await screen.findByText("Lexus ES");
+
+        await user.click(screen.getByRole("button", { name: "Pause Lexus ES" }));
+
+        await waitFor(() => expect(onUpdate).toHaveBeenCalledWith("search-1", { is_active: false }));
+        expect(await screen.findByText("(Paused)")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Resume Lexus ES" })).toBeInTheDocument();
     });
 });
 

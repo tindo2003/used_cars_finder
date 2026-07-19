@@ -198,6 +198,7 @@ export default function Home() {
     const [notificationGrouping, setNotificationGrouping] = useState<"combined" | "make" | "model">("combined");
     const [mySavedSearches, setMySavedSearches] = useState<any[]>([]);
     const [savedSearchesExpanded, setSavedSearchesExpanded] = useState(true);
+    const [editingSearchId, setEditingSearchId] = useState<string | null>(null);
 
     // --- Favorites State ---
     const [favoriteListingIds, setFavoriteListingIds] = useState<Set<string>>(new Set());
@@ -449,34 +450,66 @@ export default function Home() {
 
         setSaveStatus("loading");
 
-        const { data, error } = await supabase
-            .from("saved_searches")
-            .insert({
-                user_id: user.id,
-                name: searchName.trim() || null,
-                email: email.trim(),
-                make: make.length > 0 ? make : null,
-                model: model.length > 0 ? model : null,
-                min_year: minYear > YEAR_MIN ? minYear : null,
-                max_mileage: maxMileage < MILEAGE_MAX ? maxMileage : null,
-                max_price: maxPrice < PRICE_MAX ? maxPrice : null,
-                notification_grouping: notificationGrouping,
-            })
-            .select()
-            .single();
+        const payload = {
+            name: searchName.trim() || null,
+            email: email.trim(),
+            make: make.length > 0 ? make : null,
+            model: model.length > 0 ? model : null,
+            min_year: minYear > YEAR_MIN ? minYear : null,
+            max_mileage: maxMileage < MILEAGE_MAX ? maxMileage : null,
+            max_price: maxPrice < PRICE_MAX ? maxPrice : null,
+            notification_grouping: notificationGrouping,
+        };
+
+        const { data, error } = editingSearchId
+            ? await supabase.from("saved_searches").update(payload).eq("id", editingSearchId).select().single()
+            : await supabase
+                  .from("saved_searches")
+                  .insert({ ...payload, user_id: user.id })
+                  .select()
+                  .single();
 
         if (error) {
-            console.error("Supabase Insert Error:", error);
+            console.error("Supabase Save Error:", error);
             setSaveStatus("error");
             setTimeout(() => setSaveStatus("idle"), 3000);
         } else {
             setSaveStatus("success");
-            setSearchName("");
             if (data?.id) {
-                setMySavedSearches((prev) => [...prev, data]);
+                setMySavedSearches((prev) =>
+                    editingSearchId ? prev.map((search) => (search.id === data.id ? data : search)) : [...prev, data]
+                );
             }
-            setTimeout(() => setSaveStatus("idle"), 3000);
+            // Keep showing "Updated!"/editing state for the same 3s
+            // window as the success color, then reset -- clearing
+            // editingSearchId immediately would flip the button back to
+            // "Saved!" before the customer ever saw "Updated!".
+            setTimeout(() => {
+                setSaveStatus("idle");
+                if (editingSearchId) handleCancelEdit();
+                else setSearchName("");
+            }, 3000);
         }
+    };
+
+    const handleEditSavedSearch = (search: any) => {
+        setEditingSearchId(search.id);
+        setSearchName(search.name || "");
+        setEmail(search.email || "");
+        setMake(search.make || []);
+        setModel(search.model || []);
+        setMinYear(search.min_year || YEAR_MIN);
+        setMaxMileage(search.max_mileage || MILEAGE_MAX);
+        setMaxPrice(search.max_price || PRICE_MAX);
+        setNotificationGrouping(search.notification_grouping || "combined");
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+
+    const handleCancelEdit = () => {
+        setEditingSearchId(null);
+        setSearchName("");
+        handleClearFilters();
+        setNotificationGrouping("combined");
     };
 
     const handleDeleteSavedSearch = async (id: string) => {
@@ -486,6 +519,22 @@ export default function Home() {
             return;
         }
         setMySavedSearches((prev) => prev.filter((search) => search.id !== id));
+        if (editingSearchId === id) handleCancelEdit();
+    };
+
+    const handleToggleSavedSearchActive = async (search: any) => {
+        const nextActive = !(search.is_active ?? true);
+        const { error } = await supabase
+            .from("saved_searches")
+            .update({ is_active: nextActive })
+            .eq("id", search.id);
+        if (error) {
+            console.error("Supabase Update Error:", error);
+            return;
+        }
+        setMySavedSearches((prev) =>
+            prev.map((s) => (s.id === search.id ? { ...s, is_active: nextActive } : s))
+        );
     };
 
     const handleToggleFavorite = async (car: any) => {
@@ -899,6 +948,21 @@ export default function Home() {
                                 </div>
                             </div>
 
+                            {editingSearchId && (
+                                <div className="flex items-center justify-between gap-3 mb-3 p-2 bg-blue-100 rounded-lg text-sm text-blue-900">
+                                    <span>
+                                        Editing <span className="font-semibold">{searchName || "Unnamed search"}</span> — change the filters above, then Update.
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={handleCancelEdit}
+                                        className="font-semibold underline whitespace-nowrap"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            )}
+
                             <div className="flex items-center gap-4 text-sm text-blue-900 mb-3">
                                 <span className="font-semibold">Group emails by:</span>
                                 {(["combined", "make", "model"] as const).map((option) => (
@@ -948,12 +1012,18 @@ export default function Home() {
                                     }`}
                                 >
                                     {saveStatus === "loading"
-                                        ? "Saving..."
+                                        ? editingSearchId
+                                            ? "Updating..."
+                                            : "Saving..."
                                         : saveStatus === "success"
-                                          ? "Saved!"
+                                          ? editingSearchId
+                                              ? "Updated!"
+                                              : "Saved!"
                                           : saveStatus === "error"
                                             ? "Error"
-                                            : "Save Search"}
+                                            : editingSearchId
+                                              ? "Update Search"
+                                              : "Save Search"}
                                 </button>
                             </form>
                         </>
@@ -986,18 +1056,39 @@ export default function Home() {
                                     <div>
                                         <p className="font-semibold text-slate-900">
                                             {search.name || "Unnamed search"}
+                                            {search.is_active === false && (
+                                                <span className="ml-2 text-xs font-medium text-slate-400">
+                                                    (Paused)
+                                                </span>
+                                            )}
                                         </p>
                                         <p className="text-sm text-slate-500">
                                             {describeSavedSearch(search)} — {search.email}
                                         </p>
                                     </div>
-                                    <button
-                                        onClick={() => handleDeleteSavedSearch(search.id)}
-                                        aria-label={`Delete ${search.name || "Unnamed search"}`}
-                                        className="text-red-600 font-semibold text-sm hover:text-red-800 transition whitespace-nowrap"
-                                    >
-                                        Delete
-                                    </button>
+                                    <div className="flex items-center gap-3 whitespace-nowrap">
+                                        <button
+                                            onClick={() => handleEditSavedSearch(search)}
+                                            aria-label={`Edit ${search.name || "Unnamed search"}`}
+                                            className="text-blue-600 font-semibold text-sm hover:text-blue-800 transition"
+                                        >
+                                            Edit
+                                        </button>
+                                        <button
+                                            onClick={() => handleToggleSavedSearchActive(search)}
+                                            aria-label={`${search.is_active === false ? "Resume" : "Pause"} ${search.name || "Unnamed search"}`}
+                                            className="text-slate-600 font-semibold text-sm hover:text-slate-900 transition"
+                                        >
+                                            {search.is_active === false ? "Resume" : "Pause"}
+                                        </button>
+                                        <button
+                                            onClick={() => handleDeleteSavedSearch(search.id)}
+                                            aria-label={`Delete ${search.name || "Unnamed search"}`}
+                                            className="text-red-600 font-semibold text-sm hover:text-red-800 transition"
+                                        >
+                                            Delete
+                                        </button>
+                                    </div>
                                 </li>
                             ))}
                         </ul>
