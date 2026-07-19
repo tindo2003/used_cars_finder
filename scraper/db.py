@@ -1,21 +1,13 @@
 import os
-import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, cast
 
-from postgrest.exceptions import APIError
 from pydantic import ValidationError
 from supabase import create_client
 
 from models import Listing
 from utils.timestamps import parse_timestamp
-
-# Matches Postgres's own unique-violation detail text, e.g.
-# "Key (original_url)=(https://...) already exists." -- stable across
-# Postgres versions and independent of whatever the constraint itself
-# happens to be named (which could change in a future migration).
-_DUPLICATE_KEY_COLUMNS_PATTERN = re.compile(r"^Key \(([^)]+)\)=")
 
 # How close a returned row's created_at has to be to the last_seen_at we
 # just stamped to count as "this upsert inserted the row" rather than
@@ -35,28 +27,6 @@ def get_supabase() -> Any:
     return create_client(url, key)
 
 
-def get_conflict_key(car: Listing) -> str:
-    """
-    VIN is the real stable identity for dealer-sourced cars (a listing's
-    URL can drift over time, e.g. an edited trim name changes the slug);
-    fall back to original_url for VIN-less sources like Craigslist.
-
-    Conflict target is (vin, dealer_name), not vin alone: dealer groups
-    often syndicate the same physical vehicle's VIN across multiple
-    storefronts they own (e.g. a trade-in shows up on both "Nissan San
-    Jose" and sister store "Honda Fremont"). Upserting on bare vin would
-    make the second store's scrape silently overwrite the first store's
-    dealer_name/city/original_url in place -- one row that flip-flops
-    location with no visible duplicate and no history of the swap.
-    Keying on the pair keeps each storefront's listing as its own row
-    (still collapsing repeat scrapes of the *same* dealer's listing, the
-    original bug this fixed -- see migration 001), so the cross-listing
-    case becomes visible and gets flagged by duplicates.py instead of
-    disappearing silently.
-    """
-    return "vin,dealer_name" if car.vin else "original_url"
-
-
 def _row_was_inserted(last_seen_at: str, returned_row: Dict[str, Any]) -> bool:
     """
     True if `returned_row` (the row an upsert call just affected) looks
@@ -67,19 +37,6 @@ def _row_was_inserted(last_seen_at: str, returned_row: Dict[str, Any]) -> bool:
     if created_at is None or stamped_at is None:
         return False
     return abs(stamped_at - created_at) < NEW_ROW_TOLERANCE
-
-
-def _conflicting_columns(error: APIError) -> List[str]:
-    """
-    The column name(s) a unique-violation (23505) error was raised for,
-    parsed from Postgres's own "Key (col)=(value) already exists" detail
-    text -- e.g. ["original_url"]. Empty for any other error or anything
-    unparseable, rather than guessing.
-    """
-    if error.code != "23505" or not error.details:
-        return []
-    match = _DUPLICATE_KEY_COLUMNS_PATTERN.match(error.details)
-    return [column.strip() for column in match.group(1).split(",")] if match else []
 
 
 def read_listings(supabase: Any, **filters: Any) -> List[Listing]:
@@ -132,46 +89,51 @@ class DbClient:
             query = query.eq(key, value)
         return query.execute()
 
-    def upsert(self, car: Listing) -> Optional[bool]:
+    def upsert(self, car: Listing) -> bool:
         """
-        Insert or update a listing, deduping on (vin, dealer_name)
-        (dealer sources) or original_url (VIN-less sources like
-        Craigslist) — see get_conflict_key(). Stamps last_seen_at with
-        the current time on every call (insert or update) -- this is
-        what staleness.expire_stale_listings and deals.ranking_key's
-        recency tiebreak both key off of.
+        Insert or update a listing. Stamps last_seen_at with the current
+        time on every call (insert or update) -- this is what
+        staleness.expire_stale_listings and deals.ranking_key's recency
+        tiebreak both key off of.
 
         Returns True if this call inserted a brand-new row, False if it
-        updated an existing one, or None if the car was skipped entirely
-        (see below) -- determined from the same response, no extra
-        round trip (see _row_was_inserted).
+        updated an existing one.
         """
         last_seen_at = datetime.now(timezone.utc).isoformat()
         payload = car.model_dump(exclude_none=True, mode="json")
         payload["status"] = "active"
         payload["last_seen_at"] = last_seen_at
-        conflict_key = get_conflict_key(car)
 
-        try:
-            result = self._table().upsert(payload, on_conflict=conflict_key).execute()
-        except APIError as error:
-            if conflict_key != "original_url" and "original_url" in _conflicting_columns(error):
-                # A dealer site's own inventory card can link straight to
-                # a DIFFERENT dealer's detail page for the same physical
-                # vehicle -- observed live: a Capitol Honda card linking
-                # to chevroletoffremont.com (see providers/dealerinspire.py,
-                # which takes original_url verbatim from the card's own
-                # href, not from base_url). original_url's uniqueness is
-                # table-wide, so upserting on (vin, dealer_name) is blind
-                # to it already belonging to another dealer's row. Skip
-                # rather than overwrite that row's identity through a
-                # side door -- the exact class of bug get_conflict_key's
-                # (vin, dealer_name) key exists to prevent, just tripped
-                # via a different column this time.
-                return None
-            raise
+        if car.vin:
+            # (vin, dealer_name), not vin alone: dealer groups often
+            # syndicate the same physical vehicle's VIN across multiple
+            # storefronts they own (e.g. a trade-in shows up on both
+            # "Capitol Honda" and sister store "Capitol Ford"). Upserting
+            # on bare vin would make the second store's scrape silently
+            # overwrite the first store's dealer_name/city/original_url in
+            # place -- one row that flip-flops location with no visible
+            # duplicate and no history of the swap. Keying on the pair
+            # keeps each storefront's listing as its own row, so the
+            # cross-listing case becomes visible and gets flagged by
+            # duplicates.py instead of disappearing silently.
+            result = self._table().upsert(payload, on_conflict="vin,dealer_name").execute()
+            return _row_was_inserted(last_seen_at, result.data[0] if result.data else {})
 
-        return _row_was_inserted(last_seen_at, result.data[0] if result.data else {})
+        # VIN-less sources (e.g. Craigslist) have no database-level unique
+        # constraint to upsert against: original_url isn't reliably unique
+        # either, since a dealer's own inventory card can legitimately
+        # link to a DIFFERENT dealer's page for the same syndicated
+        # vehicle (see migrations/012). So this path dedupes manually --
+        # look the row up by original_url first, update if found, insert
+        # if not -- rather than relying on Postgres's ON CONFLICT
+        # inference, which needs a real unique arbiter we don't have here.
+        existing = self.read(original_url=car.original_url) if car.original_url else []
+        if existing:
+            self.update({"id": existing[0]["id"]}, payload)
+            return False
+
+        self.create(payload)
+        return True
 
     def _maybe_log_progress(self, progress: Dict[str, Any], log_interval_seconds: float) -> None:
         now = time.monotonic()
@@ -205,16 +167,14 @@ class DbClient:
                 self._maybe_log_progress(progress, log_interval_seconds)
                 continue
 
-            result = self.upsert(listing)
+            inserted = self.upsert(listing)
 
             # Every car scraped gets upserted (deduped on vin/original_url,
-            # see get_conflict_key), so "saved" counts records processed
-            # this run, not distinct rows in the table -- "inserted" vs.
-            # "updated" vs. "skipped" vs. "invalid" is the actual breakdown.
+            # see upsert()), so "saved" counts records processed this run,
+            # not distinct rows in the table -- "inserted" vs. "updated"
+            # vs. "invalid" is the actual breakdown.
             progress["saved"] += 1
-            if result is None:
-                progress["skipped"] = progress.get("skipped", 0) + 1
-            elif result:
+            if inserted:
                 progress["inserted"] = progress.get("inserted", 0) + 1
             else:
                 progress["updated"] = progress.get("updated", 0) + 1

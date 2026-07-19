@@ -3,9 +3,8 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 import pytest
-from postgrest.exceptions import APIError
 
-from db import DbClient, get_conflict_key
+from db import DbClient
 from models import Listing
 from tests.fakes import FakeSupabase
 
@@ -15,29 +14,9 @@ def make_progress(last_log=None):
         "saved": 0,
         "inserted": 0,
         "updated": 0,
-        "skipped": 0,
         "invalid": 0,
         "last_log": last_log if last_log is not None else time.monotonic(),
     }
-
-
-# --- get_conflict_key ---
-
-
-def test_get_conflict_key_prefers_vin_and_dealer_name_when_present():
-    assert get_conflict_key(Listing(vin="1HGCR2F81DA008735", dealer_name="Capitol Honda")) == "vin,dealer_name"
-
-
-def test_get_conflict_key_falls_back_to_original_url_when_vin_missing():
-    assert get_conflict_key(Listing()) == "original_url"
-
-
-def test_get_conflict_key_falls_back_to_original_url_when_vin_none():
-    assert get_conflict_key(Listing(vin=None)) == "original_url"
-
-
-def test_get_conflict_key_falls_back_to_original_url_when_vin_empty_string():
-    assert get_conflict_key(Listing(vin="")) == "original_url"
 
 
 # --- create ---
@@ -119,20 +98,44 @@ def test_upsert_stamps_last_seen_at():
     db = DbClient(supabase)
     before = time.time()
 
-    db.upsert(Listing(original_url="https://example.com/a"))
+    db.upsert(Listing(vin="A", dealer_name="Capitol Honda", original_url="https://example.com/a"))
 
     payload = supabase.table("listings").calls[0]["payload"]
     stamped = datetime.fromisoformat(payload["last_seen_at"])
     assert before <= stamped.timestamp() <= time.time()
 
 
-def test_upsert_falls_back_to_original_url_when_vin_missing():
+def test_upsert_inserts_a_new_row_when_vin_missing_and_no_original_url_match():
+    # VIN-less sources (e.g. Craigslist) have no database-level unique
+    # constraint to dedupe against -- this path looks the row up by
+    # original_url manually instead of relying on ON CONFLICT.
     supabase = FakeSupabase()
     db = DbClient(supabase)
 
-    db.upsert(Listing(original_url="https://craigslist.org/view/d/example"))
+    inserted = db.upsert(Listing(original_url="https://craigslist.org/view/d/example"))
 
-    assert supabase.table("listings").calls[0]["on_conflict"] == "original_url"
+    assert inserted is True
+    rows = supabase.table("listings").data
+    assert len(rows) == 1
+    assert rows[0]["original_url"] == "https://craigslist.org/view/d/example"
+
+
+def test_upsert_updates_in_place_when_vin_missing_and_original_url_matches():
+    supabase = FakeSupabase(
+        initial_data={
+            "listings": [
+                {"id": "1", "original_url": "https://craigslist.org/view/d/example", "price": 5000},
+            ]
+        }
+    )
+    db = DbClient(supabase)
+
+    inserted = db.upsert(Listing(original_url="https://craigslist.org/view/d/example", price=4500))
+
+    assert inserted is False
+    rows = supabase.table("listings").data
+    assert len(rows) == 1
+    assert rows[0]["price"] == 4500
 
 
 def test_upsert_does_not_mutate_the_caller_listing():
@@ -222,14 +225,14 @@ def test_upsert_keeps_the_same_vin_from_a_different_dealer_as_a_separate_row():
     assert {row["dealer_name"] for row in rows} == {"Capitol Honda", "Capitol Ford"}
 
 
-def test_upsert_skips_when_original_url_collides_with_a_different_dealers_row():
+def test_upsert_keeps_both_rows_when_two_dealers_share_original_url():
     # A dealer's own inventory card can link straight to a DIFFERENT
-    # dealer's detail page for the same physical vehicle (observed live:
-    # a Capitol Honda card linking to chevroletoffremont.com). The new
-    # car's (vin, dealer_name) upsert doesn't match any existing row, so
-    # Postgres tries to INSERT -- and that INSERT collides with the
-    # existing row's original_url, which has its own separate table-wide
-    # uniqueness. Should skip rather than overwrite that row's identity.
+    # dealer's detail page for the same physical, syndicated vehicle
+    # (observed live: a Capitol Honda card linking to
+    # chevroletoffremont.com). original_url is no longer a database-level
+    # unique constraint (see migrations/012), so this should persist as
+    # two separate rows -- duplicates.py's exact-VIN-match pass is what
+    # flags this case, not a DB constraint that silently drops the row.
     supabase = FakeSupabase(
         initial_data={
             "listings": [
@@ -252,38 +255,10 @@ def test_upsert_skips_when_original_url_collides_with_a_different_dealers_row():
         )
     )
 
-    assert result is None
+    assert result is True
     rows = supabase.table("listings").data
-    assert len(rows) == 1
-    assert rows[0]["dealer_name"] == "Fremont Chevrolet"
-
-
-def test_conflicting_columns_parses_the_column_from_postgres_detail_text():
-    from db import _conflicting_columns
-
-    error = APIError({"code": "23505", "details": "Key (original_url)=(https://example.com/a) already exists."})
-    assert _conflicting_columns(error) == ["original_url"]
-
-
-def test_conflicting_columns_handles_a_composite_key():
-    from db import _conflicting_columns
-
-    error = APIError({"code": "23505", "details": "Key (vin, dealer_name)=(A, Capitol Honda) already exists."})
-    assert _conflicting_columns(error) == ["vin", "dealer_name"]
-
-
-def test_conflicting_columns_empty_for_non_unique_violation_errors():
-    from db import _conflicting_columns
-
-    error = APIError({"code": "23503", "details": "Key (original_url)=(https://example.com/a) already exists."})
-    assert _conflicting_columns(error) == []
-
-
-def test_conflicting_columns_empty_when_details_missing():
-    from db import _conflicting_columns
-
-    error = APIError({"code": "23505", "details": None})
-    assert _conflicting_columns(error) == []
+    assert len(rows) == 2
+    assert {row["dealer_name"] for row in rows} == {"Fremont Chevrolet", "Capitol Honda"}
 
 
 # --- bulk_save ---
@@ -347,7 +322,7 @@ def test_bulk_save_tracks_inserted_vs_updated_counts():
     assert progress["updated"] == 1
 
 
-def test_bulk_save_tracks_skipped_count_for_cross_dealer_url_collisions():
+def test_bulk_save_inserts_both_rows_for_a_syndicated_shared_original_url():
     supabase = FakeSupabase(
         initial_data={
             "listings": [
@@ -370,9 +345,9 @@ def test_bulk_save_tracks_skipped_count_for_cross_dealer_url_collisions():
     db.bulk_save(cars, dry_run=False, progress=progress, log_interval_seconds=9999)
 
     assert progress["saved"] == 2
-    assert progress["skipped"] == 1
-    assert progress["inserted"] == 1
+    assert progress["inserted"] == 2
     assert progress["updated"] == 0
+    assert len(supabase.table("listings").data) == 3
 
 
 def test_bulk_save_skips_a_car_that_fails_validation(capsys):

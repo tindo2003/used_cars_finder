@@ -3,11 +3,12 @@ Cross-marketplace duplicate detection: the same physical vehicle can be
 scraped from two different sources with no shared identifier (e.g. a
 dealer's own inventory site plus that same dealer's Craigslist repost,
 which usually lacks a VIN), or under the same shared VIN from two
-different storefronts in the same dealer group (db.get_conflict_key
-keys upserts on (vin, dealer_name), not vin alone, precisely so each
-storefront's listing survives as its own row instead of one silently
-overwriting the other). Distinct from the per-source dedup in db.py,
-which only catches the same ad seen twice from the *same* source.
+different storefronts in the same dealer group (db.DbClient.upsert
+keys dealer-sourced upserts on (vin, dealer_name), not vin alone,
+precisely so each storefront's listing survives as its own row instead
+of one silently overwriting the other). Distinct from the per-source
+dedup in db.py, which only catches the same ad seen twice from the
+*same* source.
 
 Parameters chosen 2026-07-20 -- see research/mvp-checklist.md.
 """
@@ -34,7 +35,7 @@ def _is_same_vehicle(a: Listing, b: Listing) -> bool:
     # An exact VIN match is a certain identity match, not a fuzzy one --
     # skip straight to true regardless of marketplace_source/dealer_name.
     # This is what catches dealer groups syndicating the same physical
-    # vehicle across sister storefronts (see db.get_conflict_key), which
+    # vehicle across sister storefronts (see db.DbClient.upsert), which
     # keeps each storefront's listing as its own row precisely so this
     # case is visible instead of one row silently overwriting another.
     if _is_same_vin(a, b):
@@ -104,7 +105,7 @@ def find_duplicate_groups(listings: List[Listing]) -> List[List[Listing]]:
 
 def _pick_canonical(group: List[Listing]) -> Listing:
     """
-    VIN is the more reliable identity (see db.get_conflict_key), so a
+    VIN is the more reliable identity (see db.DbClient.upsert), so a
     listing with one wins over a VIN-less repost of the same vehicle;
     ties broken by whichever was scraped first, then by id for
     determinism.
