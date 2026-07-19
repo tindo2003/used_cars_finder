@@ -4,10 +4,28 @@ import requests
 
 from db import DbClient
 from deals import ranking_key
+from utils.timestamps import format_relative_time
 
 RESEND_API_URL = "https://api.resend.com/emails"
 
 DEFAULT_TOP_N = 10
+
+# Mirrors app/page.tsx's MARKETPLACE_LABELS, so the digest email
+# describes a listing's source the same way the frontend does.
+MARKETPLACE_LABELS = {
+    "craigslist": "Craigslist",
+    "ebay": "eBay",
+}
+
+
+def _seller_label(listing):
+    """Mirrors app/page.tsx's getSellerLabel for consistency with the UI."""
+    dealer_name = listing.get("dealer_name")
+    if dealer_name:
+        city = listing.get("city")
+        return f"{dealer_name} · {city}" if city else dealer_name
+    marketplace_source = listing.get("marketplace_source")
+    return MARKETPLACE_LABELS.get(marketplace_source, marketplace_source)
 
 
 def matches(listing, search):
@@ -64,9 +82,11 @@ def _format_listing_html(listing):
     mileage = listing.get("mileage")
     mileage_str = f"{mileage:,} mi" if mileage is not None else "mileage unknown"
     title = f"{listing.get('model_year')} {listing.get('make')} {listing.get('model')}"
+    last_updated = format_relative_time(listing.get("last_seen_at"))
+    last_updated_part = f" — {last_updated}" if last_updated else ""
     return (
         f"<li><strong>{title}</strong> — {price_str} ({mileage_str}) "
-        f"— {listing.get('marketplace_source')} — "
+        f"— {_seller_label(listing)}{last_updated_part} — "
         f'<a href="{listing.get("original_url")}">View listing</a></li>'
     )
 

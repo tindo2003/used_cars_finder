@@ -1,4 +1,6 @@
-from notifications import DEFAULT_TOP_N, matches, notify_matches
+from datetime import datetime, timedelta, timezone
+
+from notifications import DEFAULT_TOP_N, _format_listing_html, _seller_label, matches, notify_matches
 from tests.fakes import FakeSupabase
 
 
@@ -82,6 +84,57 @@ def test_matches_rejects_wrong_transmission():
 
 def test_matches_rejects_wrong_seller_type():
     assert matches(make_listing(seller_type="private"), make_search(seller_type="dealer")) is False
+
+
+# --- _seller_label() ---
+
+
+def test_seller_label_prefers_dealer_name_and_city():
+    listing = make_listing(dealer_name="Capitol Ford", city="San Jose", marketplace_source="dealeron")
+    assert _seller_label(listing) == "Capitol Ford · San Jose"
+
+
+def test_seller_label_falls_back_to_dealer_name_alone_without_a_city():
+    listing = make_listing(dealer_name="Capitol Ford", city=None, marketplace_source="dealeron")
+    assert _seller_label(listing) == "Capitol Ford"
+
+
+def test_seller_label_uses_a_friendly_marketplace_label_without_a_dealer_name():
+    listing = make_listing(dealer_name=None, marketplace_source="craigslist")
+    assert _seller_label(listing) == "Craigslist"
+
+
+def test_seller_label_falls_back_to_the_raw_marketplace_source_if_unrecognized():
+    listing = make_listing(dealer_name=None, marketplace_source="some_new_platform")
+    assert _seller_label(listing) == "some_new_platform"
+
+
+# --- _format_listing_html() ---
+
+
+def test_format_listing_html_includes_the_seller_label_and_last_updated():
+    two_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    listing = make_listing(
+        dealer_name="Capitol Ford",
+        city="San Jose",
+        marketplace_source="dealeron",
+        last_seen_at=two_hours_ago,
+        original_url="https://example.com/listing-1",
+    )
+
+    html = _format_listing_html(listing)
+
+    assert "Capitol Ford · San Jose" in html
+    assert "Updated 2 hours ago" in html
+    assert "dealeron" not in html
+
+
+def test_format_listing_html_omits_last_updated_when_last_seen_at_is_missing():
+    listing = make_listing(last_seen_at=None)
+
+    html = _format_listing_html(listing)
+
+    assert "Updated" not in html
 
 
 # --- notify_matches(): basic single-match behavior ---
