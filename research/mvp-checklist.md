@@ -4,15 +4,20 @@ Checked against [prd.md](./prd.md) (sections referenced in brackets) and the act
 
 **Target audience assumption (2026-07-18):** reprioritized for Bay Area buyers specifically hunting for good deals, not general-purpose car shoppers. This shifts what "MVP" means in a few places. Items unaffected by this framing are left as originally scoped.
 
-**External PRD review (2026-07-19):** independent reviewers gave prioritized feedback on `prd.md`, now incorporated there as a dated addendum plus targeted section edits. Their top-ranked item — defining what a "good deal" actually means — matches this doc's own "Deal-hunter signal" item below and is now the single highest-priority open decision in the project. See `prd.md`'s addendum for the full ranking and per-item detail.
+**External PRD review (2026-07-19):** independent reviewers gave prioritized feedback on `prd.md`, now incorporated there as a dated addendum plus targeted section edits. Their top-ranked item — defining what a "good deal" actually means — matched this doc's own "Deal-hunter signal" item and was the single highest-priority open decision in the project. **Now built** — see below.
 
-## Highest-priority open decision: what does "good deal" mean?
+## "Good deal" signal — built and live (2026-07-19)
 
-Flagged independently by this doc (2026-07-18) and by external PRD review (2026-07-19) as the most important gap. The PRD promises "good deals" throughout, but nothing in the product actually evaluates deal quality — search and notifications both only check filter-matching (make/model/price/year/mileage/etc.), never whether a price is actually good relative to comparable listings.
+Was flagged independently by this doc (2026-07-18) and by external PRD review (2026-07-19) as the most important gap: the PRD promises "good deals" throughout, but nothing in the product evaluated deal quality — search and notifications only checked filter-matching.
 
-- [ ] **Decide:** ship MVP without any deal signal (current state), or implement a crude version now?
-- [ ] If implemented: a lightweight "$X below comparable listings" signal — same make/model, similar year/mileage range, price vs. the median of that group, computed from data already in the `listings` table. This would change: (a) how `notifications.py` ranks/selects the "top N" listings per digest (currently plain lowest-price, see below), and (b) potentially a "Good Deal" badge on listing cards.
-- [ ] Full Deal Score / Price History / Days on Market remain explicitly out of scope regardless (per PRD section 8, Future Roadmap) — this is only about a minimal signal, not the full roadmap item.
+- [x] `scraper/deals.py`: `compute_deal_score()` compares a listing's price against the median of other active listings with the same make/model within ±2 model years and ±20,000 miles, requiring at least 3 comparables to trust the median
+- [x] `is_good_deal()` — 12% or more below the comparable median
+- [x] `notify_matches` now ranks each digest's top N by deal score (best relative deal first) instead of plain lowest price, falling back to price when a listing can't be scored
+- [x] Found and fixed a real bug while verifying live: some listings have `price=0` (a scraper artifact), which produced bogus "100% below median" results — both the target and comparable pool now exclude non-positive prices
+- [x] 24 unit tests (`tests/test_deals.py`); 64 total passing
+- [ ] Not built: a "Good Deal" badge on listing cards in the frontend (backend/notification ranking only, per the chosen scope)
+- [ ] Known limitation, not addressed: no trim-level distinction (e.g. a base F-150 and a Raptor both count as "F-150"), which can produce misleading scores for models with wide trim-driven price spreads
+- Full Deal Score / Price History / Days on Market remain explicitly out of scope (per PRD section 8, Future Roadmap) — this was only ever a minimal signal, not the full roadmap item.
 
 ## Data ingestion (scraper) — mostly done
 
@@ -97,10 +102,11 @@ New PRD section 9 proposes: notification click-through rate (not instrumented), 
 
 ## Suggested build order (deal-hunter framing, updated 2026-07-19)
 
-1. **Decide + implement the "good deal" signal** — now the single highest-priority open item, per both this doc and external review. Affects notification ranking and potentially listing display.
-2. **Sorting control on the frontend** (Lowest Price or deal-adjusted, pending #1) — cheap, high-value for this audience.
+1. ~~Decide + implement the "good deal" signal~~ — done, see above.
+2. **Sorting control on the frontend** (Lowest Price, or expose deal score once there's a badge) — cheap, high-value for this audience.
 3. **Cross-marketplace duplicate detection** — even a crude heuristic improves perceived quality as more sources get added.
 4. **Auth** — unlocks Favorites, saved-search edit/enable-disable, and true cross-device sync; the Saved Searches localStorage stopgap proves the no-auth pattern works if Auth keeps getting deferred.
 5. **Notification gaps** — updated-listing handling and preferences/unsubscribe (e.g. a per-user configurable cadence, now that daily-vs-frequent is a real product decision rather than an assumption).
-6. **Remaining filters (transmission, seller type) + listing detail page** — lower priority for this audience than for a general-purpose shopper, but still part of the PRD.
-7. **Additional Bay Area dealer coverage + geocoding for radius search** — expand breadth once the core loop is fully tuned. Additional marketplace *types* (Cars.com, Autotrader, Facebook Marketplace) rank below this for a deal-hunter audience.
+6. **"Good Deal" badge on listing cards** — surfaces the deal score already computed, currently backend/notification-only per the chosen scope.
+7. **Remaining filters (transmission, seller type) + listing detail page** — lower priority for this audience than for a general-purpose shopper, but still part of the PRD.
+8. **Additional Bay Area dealer coverage + geocoding for radius search** — expand breadth once the core loop is fully tuned. Additional marketplace *types* (Cars.com, Autotrader, Facebook Marketplace) rank below this for a deal-hunter audience.
