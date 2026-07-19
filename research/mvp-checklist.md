@@ -14,8 +14,9 @@ Was flagged independently by this doc (2026-07-18) and by external PRD review (2
 - [x] `is_good_deal()` — 12% or more below the comparable median
 - [x] `notify_matches` now ranks each digest's top N by deal score (best relative deal first) instead of plain lowest price, falling back to price when a listing can't be scored
 - [x] Found and fixed a real bug while verifying live: some listings have `price=0` (a scraper artifact), which produced bogus "100% below median" results — both the target and comparable pool now exclude non-positive prices
-- [x] 24 unit tests (`tests/test_deals.py`); 64 total passing
-- [ ] Not built: a "Good Deal" badge on listing cards in the frontend (backend/notification ranking only, per the chosen scope)
+- [x] 27 unit tests (`tests/test_deals.py`); 67 backend total passing
+- [x] `deal_score`/`is_good_deal` persisted to `listings` (migration 005) via `update_deal_scores()`, run daily as part of `notify.py` — frontend reads the stored value instead of reimplementing the heuristic in TypeScript
+- [x] "Good Deal" badge on listing cards, showing the discount percentage — see Listings section below
 - [ ] Known limitation, not addressed: no trim-level distinction (e.g. a base F-150 and a Raptor both count as "F-150"), which can produce misleading scores for models with wide trim-driven price spreads
 - Full Deal Score / Price History / Days on Market remain explicitly out of scope (per PRD section 8, Future Roadmap) — this was only ever a minimal signal, not the full roadmap item.
 
@@ -57,7 +58,7 @@ Was flagged independently by this doc (2026-07-18) and by external PRD review (2
 
 - [x] Make/model search, min year / max mileage / max price as sliders with sensible bounds [4.1, 4.2]
 - [x] Frontend test coverage for search interactions (`app/page.test.tsx`)
-- [ ] Sorting — still only a fixed `posted_at desc` order, no user-selectable sort control [4.3]. For a deal hunter, Lowest Price (or a deal-adjusted variant, pending the decision above) is a stronger candidate default than Newest Listings.
+- [x] Sorting control [4.3]: Best Deal (default) / Newest / Lowest Price / Highest Price / Lowest Mileage
 - [ ] Autocomplete suggestions for make/model [3.3, 4.1]
 - [ ] **Lower priority for this audience:** Transmission filter [4.2] and Seller type filter [4.2]
 - [ ] Search radius filter [4.2] — blocked on the geocoding gap above
@@ -65,6 +66,7 @@ Was flagged independently by this doc (2026-07-18) and by external PRD review (2
 ## Listings — partially built
 
 - [x] Listing cards: image, price, year/make/model, mileage, dealer name + city (or a friendly marketplace label) instead of the raw platform code [3.4]
+- [x] "Good Deal" badge overlay showing the discount percentage, when `is_good_deal` is true
 - [ ] Posting time shown on the card (data exists in the DB, not yet rendered)
 - [ ] Dedicated listing detail page: full description, more photos, specs [3.4]
 
@@ -103,10 +105,9 @@ New PRD section 9 proposes: notification click-through rate (not instrumented), 
 ## Suggested build order (deal-hunter framing, updated 2026-07-19)
 
 1. ~~Decide + implement the "good deal" signal~~ — done, see above.
-2. **Sorting control on the frontend** (Lowest Price, or expose deal score once there's a badge) — cheap, high-value for this audience.
+2. ~~Sorting control + "Good Deal" badge on the frontend~~ — done, see Search & filters / Listings above. Needs migration 005 run in Supabase before "Best Deal" sort/badge show real data.
 3. **Cross-marketplace duplicate detection** — even a crude heuristic improves perceived quality as more sources get added.
 4. **Auth** — unlocks Favorites, saved-search edit/enable-disable, and true cross-device sync; the Saved Searches localStorage stopgap proves the no-auth pattern works if Auth keeps getting deferred.
 5. **Notification gaps** — updated-listing handling and preferences/unsubscribe (e.g. a per-user configurable cadence, now that daily-vs-frequent is a real product decision rather than an assumption).
-6. **"Good Deal" badge on listing cards** — surfaces the deal score already computed, currently backend/notification-only per the chosen scope.
-7. **Remaining filters (transmission, seller type) + listing detail page** — lower priority for this audience than for a general-purpose shopper, but still part of the PRD.
-8. **Additional Bay Area dealer coverage + geocoding for radius search** — expand breadth once the core loop is fully tuned. Additional marketplace *types* (Cars.com, Autotrader, Facebook Marketplace) rank below this for a deal-hunter audience.
+6. **Remaining filters (transmission, seller type) + listing detail page** — lower priority for this audience than for a general-purpose shopper, but still part of the PRD.
+7. **Additional Bay Area dealer coverage + geocoding for radius search** — expand breadth once the core loop is fully tuned. Additional marketplace *types* (Cars.com, Autotrader, Facebook Marketplace) rank below this for a deal-hunter audience.
