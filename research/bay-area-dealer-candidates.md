@@ -4,6 +4,8 @@ Candidate franchise dealerships across the [PRD](./prd.md)'s target cities, comp
 
 Updated 2026-07-18: `scraper/main.py` now scrapes 10 dealers — the original 2 (Steven's Creek Toyota on DealerOn, Capitol Honda on DealerInspire) plus 8 more confirmed here and wired into `DEALERS` (2 more DealerOn: Fremont Chevrolet, Fremont Hyundai; 6 more DealerInspire: Capitol Ford, Capitol Chevrolet, Capitol Hyundai, Stevens Creek Hyundai, Sunnyvale Honda, Fremont CDJR). Each was verified with `python main.py --dry-run --max-pages 1` before being added. This list remains the pool to pull further entries from as coverage expands.
 
+Updated 2026-07-20: added an 11th dealer, Lexus Stevens Creek (DealerOn, San Jose) — same auto group as Stevens Creek Toyota, confirmed via a direct `dealeron.scrape()` call (max_pages=1) returning correctly parsed make/model/year/price/mileage/VIN before being added to `DEALERS`.
+
 While verifying, found `dealerinspire.py`'s `page.goto(..., wait_until="networkidle")` timed out on several of these sites (capitolford.com, capitolhyundaisj.com, stevenscreekhyundai.com, sunnyvalehonda.com, fremontcdjr.com) even though they loaded fine in a real browser — some DealerInspire sites run chat widgets/trackers that poll continuously and never let the network go idle. Changed to `wait_until="domcontentloaded"`, since the provider already has an explicit `wait_for_selector(".result-wrap")` right after to confirm real content loaded.
 
 A URL here is **not yet confirmed scrapeable** just by being listed — each site needs its platform identified and (as Capitol Honda showed) a bot-protection check before writing/reusing a provider for it. Update the "Platform" column as each dealer gets verified; strike through ones that turn out unscrapeable (closed, custom site, hard bot-wall, etc).
@@ -84,6 +86,7 @@ A URL here is **not yet confirmed scrapeable** just by being listed — each sit
 | Dealer | URL | Platform |
 |---|---|---|
 | Stevens Creek Toyota | stevenscreektoyota.com | dealeron (confirmed, already in DEALERS) |
+| Lexus Stevens Creek | lexusstevenscreek.com | dealeron (confirmed 2026-07-20 via live `dealeron.scrape()` test, `.srp-inventory` container, robots.txt Crawl-delay: 10 same as Stevens Creek Toyota — same auto group, **live in DEALERS**) |
 | Capitol Honda | capitolhonda.com | dealerinspire (confirmed, already in DEALERS) |
 | Honda of Stevens Creek | hondaofstevenscreek.com | dealerdotcom |
 | Stevens Creek BMW | stevenscreekbmw.com | dealerdotcom |

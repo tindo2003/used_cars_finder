@@ -7,6 +7,7 @@ import time
 DEALERS = [
     # San Jose
     {"url": "https://www.stevenscreektoyota.com", "platform": "dealeron", "city": "San Jose", "name": "Stevens Creek Toyota"},
+    {"url": "https://www.lexusstevenscreek.com", "platform": "dealeron", "city": "San Jose", "name": "Lexus Stevens Creek"},
     {"url": "https://www.capitolhonda.com", "platform": "dealerinspire", "city": "San Jose", "name": "Capitol Honda"},
     {"url": "https://www.capitolford.com", "platform": "dealerinspire", "city": "San Jose", "name": "Capitol Ford"},
     {"url": "https://www.capitolchevysj.com", "platform": "dealerinspire", "city": "San Jose", "name": "Capitol Chevrolet"},
