@@ -1,36 +1,24 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Used Car Finder
 
-## Getting Started
+Finds good used-car deals around the Bay Area. It pulls listings from local dealer sites and Craigslist, flags the ones actually priced below what similar cars are going for (not just the cheapest), and can email you when something new matches what you're looking for.
 
-First, run the development server:
+## What it does
+
+- Search by make, model, year, mileage, and price
+- **Good Deal** badge on listings priced meaningfully below comparable cars nearby
+- Duplicate listings (the same car posted twice, or synced across a dealer's sister stores) are filtered out automatically
+- Save a search and get a daily email digest when a new match shows up, best deals first
+- Listings that haven't shown up in a while quietly drop out, since they're probably already sold
+
+No account needed — it's built for one person.
+
+## Running it
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+New listings come in automatically every 15 minutes, and the daily email digest goes out each morning — both run on their own in the background, nothing needs to stay open on your end.
