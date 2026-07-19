@@ -1,7 +1,6 @@
 import argparse
 from providers import craigslist, dealeron, dealerinspire
 from db import get_supabase, DbClient
-from notifications import notify_matches, DEFAULT_TOP_N
 from runner import ScrapeRunner
 import time
 
@@ -33,7 +32,7 @@ DEALER_SCRAPERS = {
 ACTIVE_MARKETPLACES = [craigslist.scrape]
 
 
-def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1, notify_top_n=DEFAULT_TOP_N):
+def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1):
     supabase = None
     if not dry_run:
         supabase = get_supabase()
@@ -65,10 +64,6 @@ def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1, notify_to
 
     print(f"Done. Saved {progress['saved']} listings total.")
 
-    if not dry_run:
-        sent = notify_matches(supabase, top_n=notify_top_n)
-        print(f"Sent {sent} notification email(s).")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the car scraper.")
@@ -89,17 +84,10 @@ if __name__ == "__main__":
         default=1,
         help="Minutes between progress log lines while saving listings (default: 1)",
     )
-    parser.add_argument(
-        "--notify-top-n",
-        type=int,
-        default=DEFAULT_TOP_N,
-        help=f"Max listings included per notification digest email (default: {DEFAULT_TOP_N})",
-    )
     args = parser.parse_args()
 
     run_scraper(
         dry_run=args.dry_run,
         max_pages=args.max_pages,
         log_interval_minutes=args.log_interval,
-        notify_top_n=args.notify_top_n,
     )
