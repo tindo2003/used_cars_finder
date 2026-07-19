@@ -36,18 +36,27 @@ class ScrapeRunner:
         log_interval_seconds: float,
     ) -> None:
         for search in searches:
-            make = search.get("make") or ""
-            model = search.get("model") or ""
+            makes = search.get("make") or []
+            models = search.get("model") or []
 
-            if not make and not model:
+            if not makes and not models:
                 continue
 
-            print(f"\nEvaluating target: {make.capitalize()} {model.capitalize()}")
+            # A saved search can watch several makes/models at once
+            # (migration 014, any-of-list semantics) -- Craigslist's
+            # search endpoint only takes one query at a time, so cover
+            # every make x model combination (the same AND-of-two-OR-sets
+            # semantics the search filter and notification matching use).
+            # `[None]` stands in for an unset dimension so e.g. "any
+            # Camry" (no make filter) still runs once, not zero times.
+            for make in makes or [None]:
+                for model in models or [None]:
+                    print(f"\nEvaluating target: {(make or '').capitalize()} {(model or '').capitalize()}")
 
-            options = ScrapeOptions(make=make, model=model, max_price=search.get("max_price"))
-            for provider_func in self.active_marketplaces:
-                cars_found = provider_func(options)
-                self.db_client.bulk_save(cars_found, dry_run, progress, log_interval_seconds)
+                    options = ScrapeOptions(make=make, model=model, max_price=search.get("max_price"))
+                    for provider_func in self.active_marketplaces:
+                        cars_found = provider_func(options)
+                        self.db_client.bulk_save(cars_found, dry_run, progress, log_interval_seconds)
 
     def run_dealer_scrapes(
         self,
