@@ -174,7 +174,9 @@ def test_notify_matches_sends_one_digest_email_and_records_history():
     assert history[0]["listing_id"] == "listing-1"
 
 
-def test_notify_matches_sends_nothing_when_no_new_matches():
+def test_notify_matches_resends_a_listing_already_in_notification_history():
+    # A deal-hunter wants today's best matches, not just novel ones -- a
+    # search whose top result hasn't changed should still get emailed.
     supabase = FakeSupabase(
         initial_data={
             "saved_searches": [make_search_row()],
@@ -186,8 +188,8 @@ def test_notify_matches_sends_nothing_when_no_new_matches():
 
     count = notify_matches(supabase, send_email_fn=lambda email, listings: digests.append(listings))
 
-    assert count == 0
-    assert digests == []
+    assert count == 1
+    assert digests == [[make_listing()]]
 
 
 def test_notify_matches_skips_non_matching_listings():
@@ -336,7 +338,7 @@ def test_notify_matches_records_history_for_every_listing_in_the_digest():
     assert {row["listing_id"] for row in history} == {"listing-0", "listing-1", "listing-2"}
 
 
-def test_notify_matches_next_run_surfaces_the_next_cheapest_once_top_n_already_notified():
+def test_notify_matches_sends_the_same_top_n_again_on_a_second_run():
     listings = [make_listing_row(id=f"listing-{i}", price=10000 + i * 1000) for i in range(5)]
     supabase = FakeSupabase(
         initial_data={
@@ -349,7 +351,10 @@ def test_notify_matches_next_run_surfaces_the_next_cheapest_once_top_n_already_n
     digests = []
     notify_matches(supabase, send_email_fn=lambda email, listings: digests.append(listings), top_n=3)
 
-    # listing-0/1/2 already notified in the first run; the second run
-    # should surface listing-3 and listing-4, the next cheapest.
+    # Nothing changed between runs, so the same cheapest 3 get sent again.
     assert len(digests) == 1
-    assert {listing.id for listing in digests[0]} == {"listing-3", "listing-4"}
+    assert {listing.id for listing in digests[0]} == {"listing-0", "listing-1", "listing-2"}
+
+    # notification_history logs both sends -- 3 rows per run, not deduped.
+    history = supabase.table("notification_history").data
+    assert len(history) == 6

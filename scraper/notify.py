@@ -8,7 +8,7 @@ from staleness import DEFAULT_STALE_THRESHOLD_DAYS, expire_stale_listings
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Check saved searches against current listings and email any new matches."
+        description="Check saved searches against current listings and email today's top matches."
     )
     parser.add_argument(
         "--top-n",

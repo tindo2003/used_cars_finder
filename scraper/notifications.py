@@ -85,7 +85,7 @@ def send_digest_email(to_email: str, listings: List[Listing]) -> Dict[str, Any]:
         raise ValueError("Missing RESEND_API_KEY")
 
     count = len(listings)
-    subject = f"{count} new match{'es' if count != 1 else ''} for your saved search"
+    subject = f"Top {count} match{'es' if count != 1 else ''} for your saved search"
     items_html = "".join(_format_listing_html(listing) for listing in listings)
 
     res = requests.post(
@@ -95,7 +95,7 @@ def send_digest_email(to_email: str, listings: List[Listing]) -> Dict[str, Any]:
             "from": "Used Car Finder <onboarding@resend.dev>",
             "to": [to_email],
             "subject": subject,
-            "html": f"<p>New listings matching your saved search:</p><ul>{items_html}</ul>",
+            "html": f"<p>Today's top matches for your saved search:</p><ul>{items_html}</ul>",
         },
     )
     res.raise_for_status()
@@ -108,16 +108,20 @@ def notify_matches(
     top_n: int = DEFAULT_TOP_N,
 ) -> int:
     """
-    For every active saved search, find listings that match it and
-    haven't already been notified (tracked in notification_history),
-    keep the top_n ranked by deal score (see deals.ranking_key -- best
-    relative deal first, falling back to lowest price for listings
-    without enough comparables to score), and send a single digest email
-    covering all of them. A search with no filters set matches every
-    listing, so top_n is what keeps it from emailing the whole table --
-    and since only listings actually included in an email get recorded
-    in notification_history, the next run naturally surfaces the
-    next-best deals once the current top_n have been seen.
+    For every active saved search, find listings that match it, rank by
+    deal score (see deals.ranking_key -- best relative deal first,
+    falling back to lowest price for listings without enough comparables
+    to score), and send a digest of the top_n -- regardless of whether
+    those listings were included in a previous digest. A deal-hunter
+    wants today's best matches, not just novel ones, so a search whose
+    top_n hasn't changed gets the same email again the next day.
+
+    notification_history is still written to after every send (one row
+    per listing per digest it appears in), but purely as a log for a
+    future click-through-rate metric -- it's no longer read back to
+    filter what gets sent (see migrations/013, which dropped the
+    unique (saved_search_id, listing_id) constraint that used to enforce
+    "never send the same listing twice").
 
     Listings flagged as a cross-marketplace duplicate (duplicate_of set,
     see duplicates.update_duplicate_flags) are excluded so the same
@@ -132,29 +136,21 @@ def notify_matches(
 
     searches = [SavedSearch.model_validate(row) for row in searches_db.read(is_active=True)]
     listings = [listing for listing in read_listings(supabase, status="active") if not listing.duplicate_of]
-    already_notified = {
-        (row["saved_search_id"], row["listing_id"]) for row in history_db.read()
-    }
 
     emails_sent = 0
     for search in searches:
         if not search.email:
             continue
 
-        new_matches = [
-            listing
-            for listing in listings
-            if (search.id, listing.id) not in already_notified and matches(listing, search)
-        ]
-        if not new_matches:
+        matching_listings = [listing for listing in listings if matches(listing, search)]
+        if not matching_listings:
             continue
 
-        top_matches = sorted(new_matches, key=lambda listing: ranking_key(listing, listings))[:top_n]
+        top_matches = sorted(matching_listings, key=lambda listing: ranking_key(listing, listings))[:top_n]
 
         send_email_fn(search.email, top_matches)
         for listing in top_matches:
             history_db.create({"saved_search_id": search.id, "listing_id": listing.id})
-            already_notified.add((search.id, listing.id))
         emails_sent += 1
 
     return emails_sent
