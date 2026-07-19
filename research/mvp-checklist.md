@@ -84,12 +84,13 @@ Was flagged independently by this doc (2026-07-18) and by external PRD review (2
 - [ ] Edit / rename an existing saved search [4.5]
 - [ ] Enable / disable toggle [4.5]
 
-## Favorites — not started (schema-only, now unblocked)
+## Favorites — built and verified live (2026-07-20)
 
-- [x] `favorites` table exists in the DB (`user_id`, `listing_id`, `created_at`)
-- [ ] Add/remove favorite UI [3.7, 4.7]
-- [ ] Favorites page [3.2]
-- No longer blocked on Auth (done 2026-07-20) — this is now the natural fast-follow-up, same `user_id` pattern Saved Searches just adopted.
+- [x] `favorites` table exists in the DB (`user_id`, `listing_id`, `created_at`); RLS scoped to `auth.uid() = user_id` (migration 011), plus a unique index on `(user_id, listing_id)` so a listing can't be favorited twice [3.7, 4.7]
+- [x] Add/remove favorite UI — heart toggle on every listing card, only shown when logged in
+- [x] Favorites view — a "My Favorites" section on the same page (not a separate route, consistent with the single-page frontend), listing favorited cars via one embedded query (`select("*, listings(*)")`) rather than a second round trip [3.2]
+- [x] Verified live end-to-end: favoriting surfaces a listing in My Favorites immediately, un-favoriting removes it from both places, heart button absent when logged out.
+- [x] 6 new frontend tests
 
 ## Success Metrics — added 2026-07-19 per external review
 
@@ -113,7 +114,7 @@ New PRD section 9 proposes: notification click-through rate (not instrumented), 
 2. ~~Sorting control + "Good Deal" badge on the frontend~~ — done, see Search & filters / Listings above.
 3. ~~Cross-marketplace duplicate detection~~ (including same-VIN-different-storefront) — done, see Data ingestion above.
 4. ~~Auth~~ — done, see Auth above.
-5. **Favorites UI** — fast follow-up now that Auth exists; schema (`favorites` table) already in place.
+5. ~~Favorites UI~~ — done, see Favorites above.
 6. **Notification gaps** — updated-listing handling and preferences/unsubscribe (e.g. a per-user configurable cadence, now that daily-vs-frequent is a real product decision rather than an assumption).
 7. **Remaining filters (transmission, seller type) + listing detail page** — lower priority for this audience than for a general-purpose shopper, but still part of the PRD.
 8. **Additional Bay Area dealer coverage + geocoding for radius search** — expand breadth once the core loop is fully tuned. Additional marketplace *types* (Cars.com, Autotrader, Facebook Marketplace) rank below this for a deal-hunter audience.
