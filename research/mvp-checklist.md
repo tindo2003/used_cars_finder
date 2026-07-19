@@ -66,6 +66,7 @@ Was flagged independently by this doc (2026-07-18) and by external PRD review (2
 - [ ] Autocomplete suggestions for make/model [3.3, 4.1]
 - [ ] **Lower priority for this audience:** Transmission filter [4.2] and Seller type filter [4.2]
 - [ ] Search radius filter [4.2] — blocked on the geocoding gap above
+- [ ] **Multi-make search** (idea, 2026-07-20) — `make` is a single value today, both in the search filter and in `saved_searches`, so watching for "Toyota or Honda or Mazda" needs 3 separate saved searches. Letting a search/saved search hold a list of makes would need `make` to become an array (or a join table) on `saved_searches`, plus updating `notifications.matches()`'s make check and the frontend's `ilike` filter to match against any of several values. Not scoped/decided yet.
 
 ## Listings — partially built
 
