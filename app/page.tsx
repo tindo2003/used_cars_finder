@@ -8,6 +8,7 @@ const YEAR_MIN = 1990;
 const YEAR_MAX = new Date().getFullYear();
 const MILEAGE_MAX = 200000;
 const PRICE_MAX = 100000;
+const PAGE_SIZE = 50;
 
 const inputTextClass = "text-slate-900 placeholder:text-slate-400";
 
@@ -184,6 +185,8 @@ export default function Home() {
     // --- Data State ---
     const [listings, setListings] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [hasMore, setHasMore] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     // --- Save Search State ---
@@ -230,50 +233,83 @@ export default function Home() {
     }, [user]);
 
     // --- Core Logic ---
+    // Shared by the initial fetch and "Load More" -- both just apply a
+    // different .range() on top of the same filtered/sorted query.
+    const buildListingsQuery = useCallback(() => {
+        const sortOption = SORT_OPTIONS.find((option) => option.value === sortBy) ?? SORT_OPTIONS[0];
+
+        // last_seen_at is a tiebreaker only, not a sort option of its
+        // own: when the primary sort has ties (e.g. two listings at
+        // the same price), the one the scraper most recently
+        // reconfirmed is more likely still available (see
+        // scraper/staleness.py) and is preferred. `id` is a final
+        // tiebreaker so ordering (and therefore pagination via
+        // .range()) is fully deterministic even when both of the above
+        // tie too.
+        let query = supabase
+            .from("listings")
+            .select("*")
+            .eq("status", "active")
+            .is("duplicate_of", null)
+            .order(sortOption.column, { ascending: sortOption.ascending, nullsFirst: false })
+            .order("last_seen_at", { ascending: false, nullsFirst: false })
+            .order("id", { ascending: true });
+
+        // ilike with no wildcards is a case-insensitive exact match --
+        // used instead of .in() because dealer feeds aren't
+        // consistent about make/model casing (e.g. "Toyota" vs
+        // "TOYOTA" both appear in production).
+        if (make.length > 0) query = query.or(make.map((m) => `make.ilike.${m}`).join(","));
+        if (model.length > 0) query = query.or(model.map((m) => `model.ilike.${m}`).join(","));
+        if (minYear > YEAR_MIN) query = query.gte("model_year", minYear);
+        if (maxMileage < MILEAGE_MAX) query = query.lte("mileage", maxMileage);
+        if (maxPrice < PRICE_MAX) query = query.lte("price", maxPrice);
+
+        return query;
+    }, [make, model, minYear, maxMileage, maxPrice, sortBy, supabase]);
+
     const fetchListings = useCallback(async () => {
         setLoading(true);
         setError(null);
 
         try {
-            const sortOption = SORT_OPTIONS.find((option) => option.value === sortBy) ?? SORT_OPTIONS[0];
-
-            // last_seen_at is a tiebreaker only, not a sort option of its
-            // own: when the primary sort has ties (e.g. two listings at
-            // the same price), the one the scraper most recently
-            // reconfirmed is more likely still available (see
-            // scraper/staleness.py) and is preferred.
-            let query = supabase
-                .from("listings")
-                .select("*")
-                .eq("status", "active")
-                .is("duplicate_of", null)
-                .order(sortOption.column, { ascending: sortOption.ascending, nullsFirst: false })
-                .order("last_seen_at", { ascending: false, nullsFirst: false });
-
-            // ilike with no wildcards is a case-insensitive exact match --
-            // used instead of .in() because dealer feeds aren't
-            // consistent about make/model casing (e.g. "Toyota" vs
-            // "TOYOTA" both appear in production).
-            if (make.length > 0) query = query.or(make.map((m) => `make.ilike.${m}`).join(","));
-            if (model.length > 0) query = query.or(model.map((m) => `model.ilike.${m}`).join(","));
-            if (minYear > YEAR_MIN) query = query.gte("model_year", minYear);
-            if (maxMileage < MILEAGE_MAX) query = query.lte("mileage", maxMileage);
-            if (maxPrice < PRICE_MAX) query = query.lte("price", maxPrice);
-
-            const { data, error: fetchError } = await query.limit(50);
+            const { data, error: fetchError } = await buildListingsQuery().range(0, PAGE_SIZE - 1);
 
             if (fetchError) throw fetchError;
             setListings(data || []);
+            // If a full page came back, there's likely more -- avoids a
+            // separate count query, at the cost of one extra "Load More"
+            // click when the result count lands exactly on a page
+            // boundary.
+            setHasMore((data || []).length === PAGE_SIZE);
         } catch (err: any) {
             setError(err.message || "Failed to fetch listings.");
         } finally {
             setLoading(false);
         }
-    }, [make, model, minYear, maxMileage, maxPrice, sortBy, supabase]);
+    }, [buildListingsQuery]);
 
     useEffect(() => {
         fetchListings();
     }, [fetchListings]);
+
+    const handleLoadMore = async () => {
+        setLoadingMore(true);
+        try {
+            const { data, error: fetchError } = await buildListingsQuery().range(
+                listings.length,
+                listings.length + PAGE_SIZE - 1
+            );
+
+            if (fetchError) throw fetchError;
+            setListings((prev) => [...prev, ...(data || [])]);
+            setHasMore((data || []).length === PAGE_SIZE);
+        } catch (err: any) {
+            setError(err.message || "Failed to load more listings.");
+        } finally {
+            setLoadingMore(false);
+        }
+    };
 
     // Populates the make/model multi-select options from whatever
     // distinct values are actually in the inventory right now -- no
@@ -629,9 +665,22 @@ export default function Home() {
         }
 
         return (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {listings.map((car) => renderCarCard(car))}
-            </div>
+            <>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {listings.map((car) => renderCarCard(car))}
+                </div>
+                {hasMore && (
+                    <div className="flex justify-center mt-8">
+                        <button
+                            onClick={handleLoadMore}
+                            disabled={loadingMore}
+                            className="bg-white border border-slate-300 text-slate-900 font-semibold py-2.5 px-8 rounded-lg hover:bg-slate-50 transition disabled:opacity-60"
+                        >
+                            {loadingMore ? "Loading..." : "Load More"}
+                        </button>
+                    </div>
+                )}
+            </>
         );
     };
 

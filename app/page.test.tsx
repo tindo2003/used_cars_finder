@@ -36,6 +36,16 @@ function makeListing(overrides: Record<string, unknown> = {}) {
     };
 }
 
+function makeListings(count: number, idPrefix: string) {
+    return Array.from({ length: count }, (_, i) =>
+        makeListing({
+            id: `${idPrefix}-${i}`,
+            original_url: `https://example.com/${idPrefix}-${i}`,
+            model: `Camry-${idPrefix}-${i}`,
+        })
+    );
+}
+
 type SavedSearchPayload = {
     name: string | null;
     email: string;
@@ -64,6 +74,11 @@ function makeFakeSupabase({
     // need options to exist even when the (filtered) listingsResult is
     // empty, e.g. testing "clear filters" from a no-results state.
     filterOptionsResult = listingsResult,
+    // What a "Load More" click's .range() call resolves to (any .range
+    // call with a nonzero starting index) -- separate from
+    // listingsResult (the initial page, .range(0, ...)) so tests can
+    // assert a second batch actually gets appended, not re-fetched.
+    loadMoreResult = { data: [] as unknown[], error: null },
     insertResult = { data: { id: "search-1" }, error: null },
     savedSearchesSelectResult = { data: [], error: null },
     deleteResult = { error: null },
@@ -80,6 +95,7 @@ function makeFakeSupabase({
 }: {
     listingsResult?: { data: unknown[]; error: unknown };
     filterOptionsResult?: { data: unknown[]; error: unknown };
+    loadMoreResult?: { data: unknown[]; error: unknown };
     insertResult?: { data?: unknown; error: unknown };
     savedSearchesSelectResult?: { data: unknown[]; error: unknown };
     deleteResult?: { error: unknown };
@@ -103,15 +119,15 @@ function makeFakeSupabase({
         return chain;
     }
 
-    const listingsQuery = makeChainable(listingsResult, [
-        "eq",
-        "is",
-        "order",
-        "or",
-        "gte",
-        "lte",
-        "limit",
-    ]);
+    const listingsQuery = makeChainable(listingsResult, ["eq", "is", "order", "or", "gte", "lte", "limit"]);
+    // .range()'s resolved value depends on its args (the initial fetch
+    // is .range(0, ...); "Load More" is .range(<current count>, ...))
+    // rather than being a fixed chainable method, so it needs its own
+    // mock instead of the generic makeChainable pattern.
+    listingsQuery.range = vi.fn((from: number, _to: number) => {
+        listingsQuery.then = (resolve: (value: unknown) => void) => resolve(from === 0 ? listingsResult : loadMoreResult);
+        return listingsQuery;
+    });
     const filterOptionsQuery = makeChainable(filterOptionsResult, ["eq"]);
 
     // page.tsx issues two different `listings` queries: the main
@@ -538,6 +554,63 @@ describe("sorting", () => {
                 ascending: true,
                 nullsFirst: false,
             });
+        });
+    });
+});
+
+describe("pagination", () => {
+    it("does not show Load More when fewer than a full page of results comes back", async () => {
+        setFakeSupabase(makeFakeSupabase({ listingsResult: { data: [makeListing()], error: null } }));
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        expect(screen.queryByRole("button", { name: "Load More" })).not.toBeInTheDocument();
+    });
+
+    it("shows Load More when a full page of results comes back", async () => {
+        setFakeSupabase(
+            makeFakeSupabase({ listingsResult: { data: makeListings(50, "page1"), error: null } })
+        );
+        render(<Home />);
+
+        expect(await screen.findByRole("button", { name: "Load More" })).toBeInTheDocument();
+    });
+
+    it("clicking Load More appends the next page instead of replacing the current results", async () => {
+        const user = userEvent.setup();
+        const fake = makeFakeSupabase({
+            listingsResult: { data: makeListings(50, "page1"), error: null },
+            loadMoreResult: { data: makeListings(3, "page2"), error: null },
+        });
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByRole("button", { name: "Load More" });
+
+        await user.click(screen.getByRole("button", { name: "Load More" }));
+
+        await waitFor(() => {
+            expect(fake.listingsQuery.range).toHaveBeenCalledWith(50, 99);
+        });
+        // First page's cars are still there, plus the newly appended ones.
+        expect(screen.getByText("2022 Toyota Camry-page1-0")).toBeInTheDocument();
+        expect(await screen.findByText("2022 Toyota Camry-page2-0")).toBeInTheDocument();
+    });
+
+    it("hides Load More once the appended page comes back under a full page", async () => {
+        const user = userEvent.setup();
+        setFakeSupabase(
+            makeFakeSupabase({
+                listingsResult: { data: makeListings(50, "page1"), error: null },
+                loadMoreResult: { data: makeListings(3, "page2"), error: null },
+            })
+        );
+        render(<Home />);
+        await screen.findByRole("button", { name: "Load More" });
+
+        await user.click(screen.getByRole("button", { name: "Load More" }));
+
+        await waitFor(() => {
+            expect(screen.queryByRole("button", { name: "Load More" })).not.toBeInTheDocument();
         });
     });
 });
