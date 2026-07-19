@@ -67,10 +67,10 @@ Was flagged independently by this doc (2026-07-18) and by external PRD review (2
 - [x] Make/model search, min year / max mileage / max price as sliders with sensible bounds [4.1, 4.2]
 - [x] Frontend test coverage for search interactions (`app/page.test.tsx`)
 - [x] Sorting control [4.3]: Best Deal (default) / Newest / Lowest Price / Highest Price / Lowest Mileage
-- [ ] Autocomplete suggestions for make/model [3.3, 4.1]
 - [ ] **Lower priority for this audience:** Transmission filter [4.2] and Seller type filter [4.2]
 - [ ] Search radius filter [4.2] — blocked on the geocoding gap above
 - [x] **Multi-make and multi-model search** — built and verified live 2026-07-20 (migration 014). Both the search filter and `saved_searches.make`/`model` are `text[]` now; a search matches ANY selected make AND ANY selected model. Frontend is a checkbox multi-select (no autocomplete), options deduped case-insensitively from `listings`' distinct values since dealer feeds aren't consistent about casing (e.g. "Toyota"/"TOYOTA" both appear in production) — the listings query matches with case-insensitive `ilike` via `.or()` rather than `.in()` for the same reason (`.in()` is case-sensitive and would silently miss casing variants). See `memory.md`'s decisions section for full detail.
+- [x] **In-dropdown search + make-scoped model options** — built 2026-07-20. Both multi-selects now have a small text filter so a long option list (every make in production) is searchable instead of requiring scrolling. This substitutes for full autocomplete [3.3, 4.1] adequately enough for this audience/scale (options come from real inventory, not a live-query suggestion API) — true autocomplete remains unbuilt but is no longer the main gap here. Model options narrow to whatever models actually belong to the selected make(s); a previously-picked model that falls out of the now-relevant list is dropped from the filter too, rather than staying silently applied.
 
 ## Listings — partially built
 
@@ -79,6 +79,7 @@ Was flagged independently by this doc (2026-07-18) and by external PRD review (2
 - [x] "Updated X ago" on each card, from `last_seen_at` (the scraper's last reconfirmation) — same formatting mirrored in the notification digest email (`scraper/notifications.py`), including the dealer name/city instead of the raw `marketplace_source` code there too
 - [ ] `posted_at` (the source site's own listing date, different from `last_seen_at` above) not yet shown on the card, though the data exists
 - [ ] Dedicated listing detail page: full description, more photos, specs [3.4]
+- [x] **"Load More" pagination** — built 2026-07-20. The listings query was hardcoded to `.limit(50)` with no way to see anything past that (never previously flagged as a gap). Replaced with `.range()`-based pagination: a "Load More" button appears whenever a full page comes back, appending the next 50 to the grid. `id` added as a final sort tiebreaker so pagination stays deterministic even when price/`last_seen_at` both tie across a page boundary.
 
 ## Saved Searches — real auth now, cross-device sync works
 
@@ -86,6 +87,7 @@ Was flagged independently by this doc (2026-07-18) and by external PRD review (2
 - [x] List saved searches for the logged-in account, scoped by real `user_id` + RLS (migration 010) — the localStorage-tracking stopgap is gone [4.5]
 - [x] Delete a saved search [4.5]
 - [x] True cross-device sync — unblocked by Auth (2026-07-20); log in from any device, same searches
+- [x] Collapsible section — the "My Saved Searches" header is a toggle button (shows a count and Hide/Show) instead of a static heading; defaults expanded, built 2026-07-20 alongside the same change for Favorites
 - [ ] Edit / rename an existing saved search [4.5]
 - [ ] Enable / disable toggle [4.5]
 
@@ -95,6 +97,7 @@ Was flagged independently by this doc (2026-07-18) and by external PRD review (2
 - [x] Add/remove favorite UI — heart toggle on every listing card, only shown when logged in
 - [x] Favorites view — a "My Favorites" section on the same page (not a separate route, consistent with the single-page frontend), listing favorited cars via one embedded query (`select("*, listings(*)")`) rather than a second round trip [3.2]
 - [x] Verified live end-to-end: favoriting surfaces a listing in My Favorites immediately, un-favoriting removes it from both places, heart button absent when logged out.
+- [x] Collapsible section, same as Saved Searches above — built 2026-07-20
 - [x] 6 new frontend tests
 
 ## Success Metrics — added 2026-07-19 per external review
@@ -108,7 +111,7 @@ New PRD section 9 proposes: notification click-through rate (not instrumented), 
 | Access from any modern browser | ✅ |
 | Search aggregated listings | 🟡 partial (make/model/year/mileage/price, 2 source types) |
 | Apply filters | 🟡 partial (5 of 6 PRD filters; radius still blocked) |
-| Browse results | ✅ |
+| Browse results | ✅ ("Load More" pagination past the first 50, added 2026-07-20) |
 | Save searches | 🟡 create + list + delete; no edit/enable-disable yet |
 | Receive browser/email notifications | 🟡 email done and verified live; browser push not built |
 | Open original listing in one click | ✅ |
@@ -125,3 +128,4 @@ New PRD section 9 proposes: notification click-through rate (not instrumented), 
 8. **Remaining filters (transmission, seller type) + listing detail page** — lower priority for this audience than for a general-purpose shopper, but still part of the PRD.
 9. **Additional Bay Area dealer coverage + geocoding for radius search** — expand breadth once the core loop is fully tuned. Additional marketplace *types* (Cars.com, Autotrader, Facebook Marketplace) rank below this for a deal-hunter audience.
 10. ~~Fix Lexus Stevens Creek's DealerOn provider undercounting inventory, and separate dealer vs. private-party listings in the deal-score comparable pool~~ — both done, see Data ingestion / "Good deal" signal above. Both surfaced from production feedback the same day as item 7.
+11. ~~In-dropdown search for make/model, "Load More" pagination, collapsible My Saved Searches/My Favorites sections~~ — all done, see Search & filters / Listings / Saved Searches / Favorites above.
