@@ -1,6 +1,7 @@
 import argparse
 
 from db import get_supabase
+from deals import update_deal_scores
 from notifications import DEFAULT_TOP_N, notify_matches
 
 if __name__ == "__main__":
@@ -17,6 +18,9 @@ if __name__ == "__main__":
 
     supabase = get_supabase()
     print("Connected to Supabase.")
+
+    good_deals = update_deal_scores(supabase)
+    print(f"Updated deal scores; {good_deals} listings currently flagged as good deals.")
 
     sent = notify_matches(supabase, top_n=args.top_n)
     print(f"Sent {sent} notification email(s).")

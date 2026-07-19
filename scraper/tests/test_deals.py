@@ -1,4 +1,5 @@
-from deals import DEAL_MIN_COMPARABLES, DEAL_THRESHOLD, compute_deal_score, is_good_deal, ranking_key
+from deals import DEAL_MIN_COMPARABLES, DEAL_THRESHOLD, compute_deal_score, is_good_deal, ranking_key, update_deal_scores
+from tests.fakes import FakeSupabase
 
 
 def make_listing(**overrides):
@@ -181,3 +182,55 @@ def test_ranking_key_prefers_scored_deals_over_unscored_cheaper_listings():
     ordered = sorted([unscored_cheaper, scored_deal], key=lambda listing: ranking_key(listing, pool))
 
     assert [listing["id"] for listing in ordered] == ["scored", "unscored"]
+
+
+# --- update_deal_scores() ---
+
+
+def test_update_deal_scores_writes_score_and_flag_for_a_good_deal():
+    deal = make_listing(id="deal", price=8000, status="active")
+    comparables = [
+        make_listing(id=f"comp-{i}", price=10000, status="active") for i in range(3)
+    ]
+    supabase = FakeSupabase(initial_data={"listings": [deal] + comparables})
+
+    good_count = update_deal_scores(supabase)
+
+    assert good_count == 1
+    updated = {row["id"]: row for row in supabase.table("listings").data}
+    assert updated["deal"]["is_good_deal"] is True
+    assert updated["deal"]["deal_score"] == 0.2
+
+
+def test_update_deal_scores_flags_false_for_non_deals():
+    fair_price = make_listing(id="fair", price=9700, status="active")
+    comparables = [
+        make_listing(id=f"comp-{i}", price=10000, status="active") for i in range(3)
+    ]
+    supabase = FakeSupabase(initial_data={"listings": [fair_price] + comparables})
+
+    good_count = update_deal_scores(supabase)
+
+    assert good_count == 0
+    updated = {row["id"]: row for row in supabase.table("listings").data}
+    assert updated["fair"]["is_good_deal"] is False
+
+
+def test_update_deal_scores_only_considers_active_listings():
+    supabase = FakeSupabase(
+        initial_data={
+            "listings": [
+                make_listing(id="active-1", price=8000, status="active"),
+                make_listing(id="active-2", price=10000, status="active"),
+                make_listing(id="active-3", price=10000, status="active"),
+                make_listing(id="active-4", price=10000, status="active"),
+                make_listing(id="sold", price=1000, status="sold"),
+            ]
+        }
+    )
+
+    update_deal_scores(supabase)
+
+    call = supabase.table("listings").calls[0]
+    assert call["op"] == "select"
+    assert call["filters"] == {"status": "active"}

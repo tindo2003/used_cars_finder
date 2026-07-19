@@ -231,6 +231,66 @@ describe("listing display", () => {
 
         expect(await screen.findByText("Craigslist")).toBeInTheDocument();
     });
+
+    it("shows a Good Deal badge with the discount percentage when is_good_deal is true", async () => {
+        setFakeSupabase(
+            makeFakeSupabase({
+                listingsResult: {
+                    data: [makeListing({ is_good_deal: true, deal_score: 0.183 })],
+                    error: null,
+                },
+            })
+        );
+
+        render(<Home />);
+
+        expect(await screen.findByText("🔥 Good Deal · 18% off")).toBeInTheDocument();
+    });
+
+    it("does not show a Good Deal badge when is_good_deal is false", async () => {
+        setFakeSupabase(
+            makeFakeSupabase({
+                listingsResult: { data: [makeListing({ is_good_deal: false })], error: null },
+            })
+        );
+
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        expect(screen.queryByText(/Good Deal/)).not.toBeInTheDocument();
+    });
+});
+
+describe("sorting", () => {
+    it("defaults to sorting by best deal", async () => {
+        const fake = makeFakeSupabase();
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        expect(fake.listingsQuery.order).toHaveBeenCalledWith("deal_score", {
+            ascending: false,
+            nullsFirst: false,
+        });
+        expect(screen.getByRole("combobox", { name: "Sort by" })).toHaveValue("best_deal");
+    });
+
+    it("re-queries with the new sort order when the customer changes it", async () => {
+        const user = userEvent.setup();
+        const fake = makeFakeSupabase();
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await user.selectOptions(screen.getByRole("combobox", { name: "Sort by" }), "price_asc");
+
+        await waitFor(() => {
+            expect(fake.listingsQuery.order).toHaveBeenCalledWith("price", {
+                ascending: true,
+                nullsFirst: false,
+            });
+        });
+    });
 });
 
 describe("save search", () => {

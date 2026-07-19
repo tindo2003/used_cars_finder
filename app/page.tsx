@@ -27,6 +27,17 @@ function getSellerLabel(car: any) {
     return MARKETPLACE_LABELS[car.marketplace_source] ?? car.marketplace_source;
 }
 
+// deal_score/is_good_deal are computed server-side (scraper/deals.py,
+// refreshed daily) and stored on the row -- the heuristic lives in one
+// place (Python), the frontend just sorts/displays the stored value.
+const SORT_OPTIONS = [
+    { value: "best_deal", label: "Best Deal", column: "deal_score", ascending: false },
+    { value: "newest", label: "Newest Listings", column: "posted_at", ascending: false },
+    { value: "price_asc", label: "Lowest Price", column: "price", ascending: true },
+    { value: "price_desc", label: "Highest Price", column: "price", ascending: false },
+    { value: "mileage_asc", label: "Lowest Mileage", column: "mileage", ascending: true },
+] as const;
+
 // There's no auth yet, so saved searches can't be tied to a logged-in
 // user. Instead we track which ones this browser created in
 // localStorage, purely so the same browser can list/delete them later
@@ -78,6 +89,7 @@ export default function Home() {
     const [minYear, setMinYear] = useState(YEAR_MIN);
     const [maxMileage, setMaxMileage] = useState(MILEAGE_MAX);
     const [maxPrice, setMaxPrice] = useState(PRICE_MAX);
+    const [sortBy, setSortBy] = useState<(typeof SORT_OPTIONS)[number]["value"]>("best_deal");
 
     // --- Data State ---
     const [listings, setListings] = useState<any[]>([]);
@@ -98,11 +110,13 @@ export default function Home() {
         setError(null);
 
         try {
+            const sortOption = SORT_OPTIONS.find((option) => option.value === sortBy) ?? SORT_OPTIONS[0];
+
             let query = supabase
                 .from("listings")
                 .select("*")
                 .eq("status", "active")
-                .order("posted_at", { ascending: false });
+                .order(sortOption.column, { ascending: sortOption.ascending, nullsFirst: false });
 
             if (make.trim()) query = query.ilike("make", `%${make.trim()}%`);
             if (model.trim()) query = query.ilike("model", `%${model.trim()}%`);
@@ -119,7 +133,7 @@ export default function Home() {
         } finally {
             setLoading(false);
         }
-    }, [make, model, minYear, maxMileage, maxPrice, supabase]);
+    }, [make, model, minYear, maxMileage, maxPrice, sortBy, supabase]);
 
     useEffect(() => {
         fetchListings();
@@ -266,6 +280,14 @@ export default function Home() {
                     >
                         {/* Image Section */}
                         <div className="h-48 bg-slate-100 flex items-center justify-center border-b border-slate-100 overflow-hidden relative">
+                            {car.is_good_deal && (
+                                <span className="absolute top-2 left-2 z-10 bg-amber-400 text-amber-950 text-xs font-bold px-2 py-1 rounded-full shadow">
+                                    🔥 Good Deal
+                                    {typeof car.deal_score === "number"
+                                        ? ` · ${Math.round(car.deal_score * 100)}% off`
+                                        : ""}
+                                </span>
+                            )}
                             {car.photos && car.photos.length > 0 ? (
                                 <Image
                                     src={car.photos[0]}
@@ -547,7 +569,26 @@ export default function Home() {
                 )}
 
                 {/* Results Grid */}
-                <section>{renderListings()}</section>
+                <section>
+                    <div className="flex justify-end mb-4">
+                        <label htmlFor="sortBy" className="sr-only">
+                            Sort by
+                        </label>
+                        <select
+                            id="sortBy"
+                            value={sortBy}
+                            onChange={(e) => setSortBy(e.target.value as (typeof SORT_OPTIONS)[number]["value"])}
+                            className={`border border-slate-300 p-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition ${inputTextClass}`}
+                        >
+                            {SORT_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                    Sort: {option.label}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    {renderListings()}
+                </section>
             </div>
         </main>
     );
