@@ -88,8 +88,8 @@ Was flagged independently by this doc (2026-07-18) and by external PRD review (2
 - [x] Delete a saved search [4.5]
 - [x] True cross-device sync — unblocked by Auth (2026-07-20); log in from any device, same searches
 - [x] Collapsible section — the "My Saved Searches" header is a toggle button (shows a count and Hide/Show) instead of a static heading; defaults expanded, built 2026-07-20 alongside the same change for Favorites
-- [ ] Edit / rename an existing saved search [4.5]
-- [ ] Enable / disable toggle [4.5]
+- [x] **Edit / rename an existing saved search** [4.5] — built 2026-07-20. Clicking Edit loads that search's filters/name/email/grouping into the main search form; Save Search becomes Update Search for that item (an Update keyed by `id` instead of an Insert), with a banner + Cancel button while editing.
+- [x] **Enable / disable toggle** [4.5] — built 2026-07-20. Pause/Resume toggles the existing `is_active` column (already read by `notify_matches()` — no migration needed), with a "(Paused)" label in the list.
 
 ## Favorites — built and verified live (2026-07-20)
 
@@ -112,7 +112,7 @@ New PRD section 9 proposes: notification click-through rate (not instrumented), 
 | Search aggregated listings | 🟡 partial (make/model/year/mileage/price, 2 source types) |
 | Apply filters | 🟡 partial (5 of 6 PRD filters; radius still blocked) |
 | Browse results | ✅ ("Load More" pagination past the first 50, added 2026-07-20) |
-| Save searches | 🟡 create + list + delete; no edit/enable-disable yet |
+| Save searches | ✅ create + list + delete + edit + enable/disable (2026-07-20) |
 | Receive browser/email notifications | 🟡 email done and verified live; browser push not built |
 | Open original listing in one click | ✅ |
 
