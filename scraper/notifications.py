@@ -3,6 +3,7 @@ import os
 import requests
 
 from db import DbClient
+from deals import ranking_key
 
 RESEND_API_URL = "https://api.resend.com/emails"
 
@@ -98,12 +99,14 @@ def notify_matches(supabase, send_email_fn=None, top_n=DEFAULT_TOP_N):
     """
     For every active saved search, find listings that match it and
     haven't already been notified (tracked in notification_history),
-    keep the top_n cheapest, and send a single digest email covering all
-    of them. A search with no filters set matches every listing, so
-    top_n is what keeps it from emailing the whole table -- and since
-    only listings actually included in an email get recorded in
-    notification_history, the next run naturally surfaces the next-best
-    deals once the current top_n have been seen.
+    keep the top_n ranked by deal score (see deals.ranking_key -- best
+    relative deal first, falling back to lowest price for listings
+    without enough comparables to score), and send a single digest email
+    covering all of them. A search with no filters set matches every
+    listing, so top_n is what keeps it from emailing the whole table --
+    and since only listings actually included in an email get recorded
+    in notification_history, the next run naturally surfaces the
+    next-best deals once the current top_n have been seen.
 
     Returns the number of emails sent (not the number of listings).
     """
@@ -129,10 +132,7 @@ def notify_matches(supabase, send_email_fn=None, top_n=DEFAULT_TOP_N):
         if not new_matches:
             continue
 
-        top_matches = sorted(
-            new_matches,
-            key=lambda listing: listing.get("price") if listing.get("price") is not None else float("inf"),
-        )[:top_n]
+        top_matches = sorted(new_matches, key=lambda listing: ranking_key(listing, listings))[:top_n]
 
         send_email_fn(search["email"], top_matches)
         for listing in top_matches:
