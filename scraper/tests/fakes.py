@@ -6,6 +6,7 @@ DbClient and the notification matching engine without any network calls.
 """
 
 import itertools
+from typing import Any, Dict, List, Optional
 
 from postgrest.exceptions import APIError
 
@@ -13,54 +14,54 @@ _id_counter = itertools.count(1)
 
 
 class FakeResult:
-    def __init__(self, data):
+    def __init__(self, data: List[Dict[str, Any]]) -> None:
         self.data = data
 
 
 class FakeQuery:
-    def __init__(self, table):
+    def __init__(self, table: "FakeTable") -> None:
         self.table = table
-        self.op = None
-        self.payload = None
-        self.on_conflict = None
-        self.filters = {}
+        self.op: Optional[str] = None
+        self.payload: Optional[Dict[str, Any]] = None
+        self.on_conflict: Optional[str] = None
+        self.filters: Dict[str, Any] = {}
 
-    def select(self, *_args):
+    def select(self, *_args: Any) -> "FakeQuery":
         self.op = "select"
         return self
 
-    def insert(self, payload):
+    def insert(self, payload: Dict[str, Any]) -> "FakeQuery":
         self.op = "insert"
         self.payload = payload
         return self
 
-    def update(self, payload):
+    def update(self, payload: Dict[str, Any]) -> "FakeQuery":
         self.op = "update"
         self.payload = payload
         return self
 
-    def delete(self):
+    def delete(self) -> "FakeQuery":
         self.op = "delete"
         return self
 
-    def upsert(self, payload, on_conflict):
+    def upsert(self, payload: Dict[str, Any], on_conflict: str) -> "FakeQuery":
         self.op = "upsert"
         self.payload = payload
         self.on_conflict = on_conflict
         return self
 
-    def eq(self, key, value):
+    def eq(self, key: str, value: Any) -> "FakeQuery":
         self.filters[key] = value
         return self
 
-    def _matching_rows(self):
+    def _matching_rows(self) -> List[Dict[str, Any]]:
         return [
             row
             for row in self.table.data
             if all(row.get(k) == v for k, v in self.filters.items())
         ]
 
-    def execute(self):
+    def execute(self) -> FakeResult:
         self.table.calls.append(
             {
                 "op": self.op,
@@ -74,12 +75,14 @@ class FakeQuery:
             return FakeResult(self._matching_rows())
 
         if self.op == "insert":
+            assert self.payload is not None
             row = dict(self.payload)
             row.setdefault("id", f"generated-{next(_id_counter)}")
             self.table.data.append(row)
             return FakeResult([row])
 
         if self.op == "update":
+            assert self.payload is not None
             rows = self._matching_rows()
             for row in rows:
                 row.update(self.payload)
@@ -91,17 +94,20 @@ class FakeQuery:
             return FakeResult(rows)
 
         if self.op == "upsert":
+            assert self.payload is not None
+            assert self.on_conflict is not None
+            payload = self.payload
             conflict_columns = self.on_conflict.split(",")
             existing = next(
                 (
                     row
                     for row in self.table.data
-                    if all(row.get(col) == self.payload.get(col) for col in conflict_columns)
+                    if all(row.get(col) == payload.get(col) for col in conflict_columns)
                 ),
                 None,
             )
             if existing is not None:
-                existing.update(self.payload)
+                existing.update(payload)
                 return FakeResult([existing])
 
             # Real Postgres checks EVERY unique constraint on the table,
@@ -109,9 +115,9 @@ class FakeQuery:
             # its own separate table-wide uniqueness independent of
             # (vin, dealer_name). Simulate that here so db.py's handling
             # of the cross-dealer-link-collision case is testable.
-            if "original_url" not in conflict_columns and self.payload.get("original_url"):
+            if "original_url" not in conflict_columns and payload.get("original_url"):
                 url_conflict = next(
-                    (row for row in self.table.data if row.get("original_url") == self.payload.get("original_url")),
+                    (row for row in self.table.data if row.get("original_url") == payload.get("original_url")),
                     None,
                 )
                 if url_conflict is not None:
@@ -123,11 +129,11 @@ class FakeQuery:
                             ),
                             "code": "23505",
                             "hint": None,
-                            "details": f"Key (original_url)=({self.payload.get('original_url')}) already exists.",
+                            "details": f"Key (original_url)=({payload.get('original_url')}) already exists.",
                         }
                     )
 
-            row = dict(self.payload)
+            row = dict(payload)
             row.setdefault("id", f"generated-{next(_id_counter)}")
             # Mimics a real created_at default now(): fired fresh on
             # INSERT, at essentially the same moment as any last_seen_at
@@ -140,24 +146,24 @@ class FakeQuery:
 
 
 class FakeTable:
-    def __init__(self, name, data=None):
+    def __init__(self, name: str, data: Optional[List[Dict[str, Any]]] = None) -> None:
         self.name = name
-        self.data = data if data is not None else []
-        self.calls = []
+        self.data: List[Dict[str, Any]] = data if data is not None else []
+        self.calls: List[Dict[str, Any]] = []
 
-    def select(self, *args):
+    def select(self, *args: Any) -> FakeQuery:
         return FakeQuery(self).select(*args)
 
-    def insert(self, payload):
+    def insert(self, payload: Dict[str, Any]) -> FakeQuery:
         return FakeQuery(self).insert(payload)
 
-    def update(self, payload):
+    def update(self, payload: Dict[str, Any]) -> FakeQuery:
         return FakeQuery(self).update(payload)
 
-    def delete(self):
+    def delete(self) -> FakeQuery:
         return FakeQuery(self).delete()
 
-    def upsert(self, payload, on_conflict):
+    def upsert(self, payload: Dict[str, Any], on_conflict: str) -> FakeQuery:
         return FakeQuery(self).upsert(payload, on_conflict=on_conflict)
 
 
@@ -167,11 +173,11 @@ class FakeSupabase:
     tables; unseeded tables start empty.
     """
 
-    def __init__(self, initial_data=None):
+    def __init__(self, initial_data: Optional[Dict[str, List[Dict[str, Any]]]] = None) -> None:
         initial_data = initial_data or {}
         self._tables = {name: FakeTable(name, data) for name, data in initial_data.items()}
 
-    def table(self, name):
+    def table(self, name: str) -> FakeTable:
         if name not in self._tables:
             self._tables[name] = FakeTable(name)
         return self._tables[name]

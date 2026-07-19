@@ -1,11 +1,14 @@
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import ElementHandle, sync_playwright
 import json
+from typing import Any, Dict, List, Optional
 
 from options import ScrapeOptions
 from utils.pagination import page_did_not_advance
 
 
-def extract_vehicle_data(card, base_url, city=None, dealer_name=None):
+def extract_vehicle_data(
+    card: ElementHandle, base_url: str, city: Optional[str] = None, dealer_name: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     """
     Extracts vehicle details from a Playwright element handle for a
     DealerInspire ".result-wrap" card. Unlike DealerOn, all vehicle fields
@@ -20,10 +23,11 @@ def extract_vehicle_data(card, base_url, city=None, dealer_name=None):
         data = json.loads(card.get_attribute("data-vehicle") or "{}")
 
         link_elem = card.query_selector("a.hit-link")
-        link = link_elem.get_attribute("href") if link_elem else "#"
+        link = (link_elem.get_attribute("href") if link_elem else None) or "#"
 
         img_elem = card.query_selector("img")
         img_src = img_elem.get_attribute("src") if img_elem else None
+        photo_url: Optional[str]
         if img_src and img_src.startswith("/"):
             photo_url = f"{base_url.rstrip('/')}{img_src}"
         else:
@@ -50,12 +54,12 @@ def extract_vehicle_data(card, base_url, city=None, dealer_name=None):
         return None
 
 
-def scrape(base_url, options: ScrapeOptions = None):
+def scrape(base_url: str, options: Optional[ScrapeOptions] = None) -> List[Dict[str, Any]]:
     options = options or ScrapeOptions()
     max_pages = options.max_pages or 50
 
     print(f"--- DealerInspire (Browser): {base_url} ---")
-    results = []
+    results: List[Dict[str, Any]] = []
 
     with sync_playwright() as p:
         # DealerInspire sites sit behind Cloudflare bot-protection, which

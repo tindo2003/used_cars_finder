@@ -3,6 +3,7 @@ import random
 import requests
 from bs4 import BeautifulSoup
 import time
+from typing import Any, Dict, List
 
 from options import ScrapeOptions
 
@@ -12,18 +13,18 @@ headers = {
 }
 
 
-def extract_year(title):
+def extract_year(title: str) -> int:
     match = re.search(r"\b(199\d|20[0-2]\d)\b", title)
     return int(match.group(1)) if match else 2010
 
 
-def scrape(options: ScrapeOptions):
+def scrape(options: ScrapeOptions) -> List[Dict[str, Any]]:
     make = options.make or ""
     model = options.model or ""
     max_price = options.max_price
 
     print(f"--- Craigslist: {make.capitalize()} {model.capitalize()} ---")
-    results = []
+    results: List[Dict[str, Any]] = []
     query_parts = [part for part in [make, model] if part]
     search_query = "+".join(query_parts).replace(" ", "+").lower()
     search_url = f"https://sfbay.craigslist.org/search/cta?query={search_query}"

@@ -1,0 +1,30 @@
+name: Type Check
+
+on:
+    push:
+        paths:
+            - "scraper/**"
+    pull_request:
+        paths:
+            - "scraper/**"
+
+jobs:
+    mypy:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.10"
+
+            - name: Install dependencies
+              run: pip install -r scraper/requirements-dev.txt
+              # requirements-dev.txt pulls in requirements.txt (runtime deps)
+              # plus mypy/pytest/type stubs -- no Playwright browser install
+              # needed, this never runs any scraping code.
+
+            - name: Run mypy
+              run: mypy scraper --config-file scraper/mypy.ini

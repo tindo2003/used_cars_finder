@@ -1,9 +1,12 @@
 import time
 from datetime import datetime
+from typing import Any, Dict, List
 
 import pytest
+from postgrest.exceptions import APIError
 
 from db import DbClient, get_conflict_key
+from models import Listing
 from tests.fakes import FakeSupabase
 
 
@@ -13,6 +16,7 @@ def make_progress(last_log=None):
         "inserted": 0,
         "updated": 0,
         "skipped": 0,
+        "invalid": 0,
         "last_log": last_log if last_log is not None else time.monotonic(),
     }
 
@@ -21,19 +25,19 @@ def make_progress(last_log=None):
 
 
 def test_get_conflict_key_prefers_vin_and_dealer_name_when_present():
-    assert get_conflict_key({"vin": "1HGCR2F81DA008735", "dealer_name": "Capitol Honda"}) == "vin,dealer_name"
+    assert get_conflict_key(Listing(vin="1HGCR2F81DA008735", dealer_name="Capitol Honda")) == "vin,dealer_name"
 
 
 def test_get_conflict_key_falls_back_to_original_url_when_vin_missing():
-    assert get_conflict_key({}) == "original_url"
+    assert get_conflict_key(Listing()) == "original_url"
 
 
 def test_get_conflict_key_falls_back_to_original_url_when_vin_none():
-    assert get_conflict_key({"vin": None}) == "original_url"
+    assert get_conflict_key(Listing(vin=None)) == "original_url"
 
 
 def test_get_conflict_key_falls_back_to_original_url_when_vin_empty_string():
-    assert get_conflict_key({"vin": ""}) == "original_url"
+    assert get_conflict_key(Listing(vin="")) == "original_url"
 
 
 # --- create ---
@@ -102,7 +106,7 @@ def test_upsert_uses_vin_and_dealer_name_as_conflict_key_when_present():
     supabase = FakeSupabase()
     db = DbClient(supabase)
 
-    db.upsert({"vin": "A", "dealer_name": "Capitol Honda", "original_url": "https://example.com/a"})
+    db.upsert(Listing(vin="A", dealer_name="Capitol Honda", original_url="https://example.com/a"))
 
     call = supabase.table("listings").calls[0]
     assert call["op"] == "upsert"
@@ -115,7 +119,7 @@ def test_upsert_stamps_last_seen_at():
     db = DbClient(supabase)
     before = time.time()
 
-    db.upsert({"original_url": "https://example.com/a"})
+    db.upsert(Listing(original_url="https://example.com/a"))
 
     payload = supabase.table("listings").calls[0]["payload"]
     stamped = datetime.fromisoformat(payload["last_seen_at"])
@@ -126,20 +130,20 @@ def test_upsert_falls_back_to_original_url_when_vin_missing():
     supabase = FakeSupabase()
     db = DbClient(supabase)
 
-    db.upsert({"original_url": "https://craigslist.org/view/d/example"})
+    db.upsert(Listing(original_url="https://craigslist.org/view/d/example"))
 
     assert supabase.table("listings").calls[0]["on_conflict"] == "original_url"
 
 
-def test_upsert_does_not_mutate_the_caller_dict():
+def test_upsert_does_not_mutate_the_caller_listing():
     supabase = FakeSupabase()
     db = DbClient(supabase)
-    car = {"vin": "A"}
+    car = Listing(vin="A")
 
     db.upsert(car)
 
-    assert "status" not in car
-    assert "last_seen_at" not in car
+    assert car.status is None
+    assert car.last_seen_at is None
 
 
 def test_upsert_updates_in_place_on_conflict():
@@ -158,7 +162,7 @@ def test_upsert_updates_in_place_on_conflict():
     )
     db = DbClient(supabase)
 
-    db.upsert({"vin": "A", "dealer_name": "Capitol Honda", "original_url": "https://example.com/b", "price": 200})
+    db.upsert(Listing(vin="A", dealer_name="Capitol Honda", original_url="https://example.com/b", price=200))
 
     rows = supabase.table("listings").data
     assert len(rows) == 1
@@ -170,7 +174,7 @@ def test_upsert_returns_true_when_inserting_a_new_row():
     supabase = FakeSupabase()
     db = DbClient(supabase)
 
-    inserted = db.upsert({"vin": "A", "dealer_name": "Capitol Honda", "original_url": "https://example.com/a"})
+    inserted = db.upsert(Listing(vin="A", dealer_name="Capitol Honda", original_url="https://example.com/a"))
 
     assert inserted is True
 
@@ -191,7 +195,7 @@ def test_upsert_returns_false_when_updating_an_existing_row():
     )
     db = DbClient(supabase)
 
-    inserted = db.upsert({"vin": "A", "dealer_name": "Capitol Honda", "original_url": "https://example.com/a"})
+    inserted = db.upsert(Listing(vin="A", dealer_name="Capitol Honda", original_url="https://example.com/a"))
 
     assert inserted is False
 
@@ -211,7 +215,7 @@ def test_upsert_keeps_the_same_vin_from_a_different_dealer_as_a_separate_row():
     )
     db = DbClient(supabase)
 
-    db.upsert({"vin": "A", "dealer_name": "Capitol Ford", "original_url": "https://ford.example/a"})
+    db.upsert(Listing(vin="A", dealer_name="Capitol Ford", original_url="https://ford.example/a"))
 
     rows = supabase.table("listings").data
     assert len(rows) == 2
@@ -241,11 +245,11 @@ def test_upsert_skips_when_original_url_collides_with_a_different_dealers_row():
     db = DbClient(supabase)
 
     result = db.upsert(
-        {
-            "vin": "JF2SKAJC5SH408677",
-            "dealer_name": "Capitol Honda",
-            "original_url": "https://www.chevroletoffremont.com/used-...-JF2SKAJC5SH408677",
-        }
+        Listing(
+            vin="JF2SKAJC5SH408677",
+            dealer_name="Capitol Honda",
+            original_url="https://www.chevroletoffremont.com/used-...-JF2SKAJC5SH408677",
+        )
     )
 
     assert result is None
@@ -257,50 +261,29 @@ def test_upsert_skips_when_original_url_collides_with_a_different_dealers_row():
 def test_conflicting_columns_parses_the_column_from_postgres_detail_text():
     from db import _conflicting_columns
 
-    class FakeError:
-        def __init__(self, code, details):
-            self.code = code
-            self.details = details
-
-    assert _conflicting_columns(FakeError("23505", "Key (original_url)=(https://example.com/a) already exists.")) == [
-        "original_url"
-    ]
+    error = APIError({"code": "23505", "details": "Key (original_url)=(https://example.com/a) already exists."})
+    assert _conflicting_columns(error) == ["original_url"]
 
 
 def test_conflicting_columns_handles_a_composite_key():
     from db import _conflicting_columns
 
-    class FakeError:
-        def __init__(self, code, details):
-            self.code = code
-            self.details = details
-
-    assert _conflicting_columns(FakeError("23505", "Key (vin, dealer_name)=(A, Capitol Honda) already exists.")) == [
-        "vin",
-        "dealer_name",
-    ]
+    error = APIError({"code": "23505", "details": "Key (vin, dealer_name)=(A, Capitol Honda) already exists."})
+    assert _conflicting_columns(error) == ["vin", "dealer_name"]
 
 
 def test_conflicting_columns_empty_for_non_unique_violation_errors():
     from db import _conflicting_columns
 
-    class FakeError:
-        def __init__(self, code, details):
-            self.code = code
-            self.details = details
-
-    assert _conflicting_columns(FakeError("23503", "Key (original_url)=(https://example.com/a) already exists.")) == []
+    error = APIError({"code": "23503", "details": "Key (original_url)=(https://example.com/a) already exists."})
+    assert _conflicting_columns(error) == []
 
 
 def test_conflicting_columns_empty_when_details_missing():
     from db import _conflicting_columns
 
-    class FakeError:
-        def __init__(self, code, details):
-            self.code = code
-            self.details = details
-
-    assert _conflicting_columns(FakeError("23505", None)) == []
+    error = APIError({"code": "23505", "details": None})
+    assert _conflicting_columns(error) == []
 
 
 # --- bulk_save ---
@@ -390,6 +373,26 @@ def test_bulk_save_tracks_skipped_count_for_cross_dealer_url_collisions():
     assert progress["skipped"] == 1
     assert progress["inserted"] == 1
     assert progress["updated"] == 0
+
+
+def test_bulk_save_skips_a_car_that_fails_validation(capsys):
+    # Raw scraped data is untrusted -- a provider parsing bug shouldn't
+    # crash the whole run, just this one listing.
+    supabase = FakeSupabase()
+    db = DbClient(supabase)
+    progress = make_progress()
+    cars: List[Dict[str, Any]] = [
+        {"vin": "GOOD", "model_year": 2020},
+        {"vin": "BAD", "model_year": "not-a-number"},
+    ]
+
+    db.bulk_save(cars, dry_run=False, progress=progress, log_interval_seconds=9999)
+
+    assert progress["saved"] == 2
+    assert progress["invalid"] == 1
+    assert progress["inserted"] == 1
+    assert len(supabase.table("listings").data) == 1
+    assert "Skipping invalid listing" in capsys.readouterr().out
 
 
 def test_bulk_save_throttles_progress_logging(capsys):

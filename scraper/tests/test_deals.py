@@ -1,4 +1,5 @@
 from deals import DEAL_MIN_COMPARABLES, DEAL_THRESHOLD, compute_deal_score, is_good_deal, ranking_key, update_deal_scores
+from models import Listing
 from tests.fakes import FakeSupabase
 
 
@@ -12,7 +13,15 @@ def make_listing(**overrides):
         "price": 15000,
     }
     listing.update(overrides)
-    return listing
+    return Listing.model_validate(listing)
+
+
+def make_listing_row(**overrides):
+    """Same defaults as make_listing(), but as a plain dict -- for
+    seeding FakeSupabase, which stores/returns rows exactly as Supabase
+    would (see read_listings(), the boundary that validates them back
+    into a Listing)."""
+    return make_listing(**overrides).model_dump(exclude_none=True)
 
 
 def make_comparables(prices, **shared_overrides):
@@ -128,6 +137,7 @@ def test_is_good_deal_true_at_or_above_threshold():
     comparables = make_comparables([10000, 10000, 10000])
 
     score = compute_deal_score(listing, [listing] + comparables)
+    assert score is not None
     assert score >= DEAL_THRESHOLD
     assert is_good_deal(listing, [listing] + comparables) is True
 
@@ -157,7 +167,7 @@ def test_ranking_key_orders_scored_listings_by_best_deal_first():
 
     ordered = sorted([great_deal, ok_deal], key=lambda listing: ranking_key(listing, pool))
 
-    assert [listing["id"] for listing in ordered] == ["great", "ok"]
+    assert [listing.id for listing in ordered] == ["great", "ok"]
 
 
 def test_ranking_key_falls_back_to_price_when_score_unavailable():
@@ -170,7 +180,7 @@ def test_ranking_key_falls_back_to_price_when_score_unavailable():
         key=lambda listing: ranking_key(listing, [cheap_unscored, pricier_unscored]),
     )
 
-    assert [listing["id"] for listing in ordered] == ["cheap", "pricier"]
+    assert [listing.id for listing in ordered] == ["cheap", "pricier"]
 
 
 def test_ranking_key_prefers_scored_deals_over_unscored_cheaper_listings():
@@ -181,7 +191,7 @@ def test_ranking_key_prefers_scored_deals_over_unscored_cheaper_listings():
     pool = [scored_deal, unscored_cheaper] + comparables
     ordered = sorted([unscored_cheaper, scored_deal], key=lambda listing: ranking_key(listing, pool))
 
-    assert [listing["id"] for listing in ordered] == ["scored", "unscored"]
+    assert [listing.id for listing in ordered] == ["scored", "unscored"]
 
 
 def test_ranking_key_breaks_a_score_tie_by_more_recently_seen_first():
@@ -192,7 +202,7 @@ def test_ranking_key_breaks_a_score_tie_by_more_recently_seen_first():
     pool = [seen_recently, seen_a_while_ago] + comparables
     ordered = sorted([seen_a_while_ago, seen_recently], key=lambda listing: ranking_key(listing, pool))
 
-    assert [listing["id"] for listing in ordered] == ["recent", "stale"]
+    assert [listing.id for listing in ordered] == ["recent", "stale"]
 
 
 def test_ranking_key_breaks_a_price_tie_by_more_recently_seen_first():
@@ -205,7 +215,7 @@ def test_ranking_key_breaks_a_price_tie_by_more_recently_seen_first():
         key=lambda listing: ranking_key(listing, [seen_recently, seen_a_while_ago]),
     )
 
-    assert [listing["id"] for listing in ordered] == ["recent", "stale"]
+    assert [listing.id for listing in ordered] == ["recent", "stale"]
 
 
 def test_ranking_key_treats_missing_last_seen_at_as_least_recent():
@@ -216,16 +226,16 @@ def test_ranking_key_treats_missing_last_seen_at_as_least_recent():
     pool = [seen_recently, never_recorded] + comparables
     ordered = sorted([never_recorded, seen_recently], key=lambda listing: ranking_key(listing, pool))
 
-    assert [listing["id"] for listing in ordered] == ["recent", "unknown"]
+    assert [listing.id for listing in ordered] == ["recent", "unknown"]
 
 
 # --- update_deal_scores() ---
 
 
 def test_update_deal_scores_writes_score_and_flag_for_a_good_deal():
-    deal = make_listing(id="deal", price=8000, status="active")
+    deal = make_listing_row(id="deal", price=8000, status="active")
     comparables = [
-        make_listing(id=f"comp-{i}", price=10000, status="active") for i in range(3)
+        make_listing_row(id=f"comp-{i}", price=10000, status="active") for i in range(3)
     ]
     supabase = FakeSupabase(initial_data={"listings": [deal] + comparables})
 
@@ -238,9 +248,9 @@ def test_update_deal_scores_writes_score_and_flag_for_a_good_deal():
 
 
 def test_update_deal_scores_flags_false_for_non_deals():
-    fair_price = make_listing(id="fair", price=9700, status="active")
+    fair_price = make_listing_row(id="fair", price=9700, status="active")
     comparables = [
-        make_listing(id=f"comp-{i}", price=10000, status="active") for i in range(3)
+        make_listing_row(id=f"comp-{i}", price=10000, status="active") for i in range(3)
     ]
     supabase = FakeSupabase(initial_data={"listings": [fair_price] + comparables})
 
@@ -255,11 +265,11 @@ def test_update_deal_scores_only_considers_active_listings():
     supabase = FakeSupabase(
         initial_data={
             "listings": [
-                make_listing(id="active-1", price=8000, status="active"),
-                make_listing(id="active-2", price=10000, status="active"),
-                make_listing(id="active-3", price=10000, status="active"),
-                make_listing(id="active-4", price=10000, status="active"),
-                make_listing(id="sold", price=1000, status="sold"),
+                make_listing_row(id="active-1", price=8000, status="active"),
+                make_listing_row(id="active-2", price=10000, status="active"),
+                make_listing_row(id="active-3", price=10000, status="active"),
+                make_listing_row(id="active-4", price=10000, status="active"),
+                make_listing_row(id="sold", price=1000, status="sold"),
             ]
         }
     )

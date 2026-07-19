@@ -1,4 +1,7 @@
-def page_did_not_advance(current_vins, previous_vins):
+from typing import AbstractSet, Optional
+
+
+def page_did_not_advance(current_vins: AbstractSet[str], previous_vins: Optional[AbstractSet[str]]) -> bool:
     """
     True if clicking "Next" produced the exact same set of VINs as the
     prior page -- meaning the click succeeded (no exception) but the

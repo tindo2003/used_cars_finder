@@ -1,8 +1,10 @@
 import argparse
+import time
+from typing import Optional
+
 from providers import craigslist, dealeron, dealerinspire
 from db import get_supabase, DbClient
 from runner import ScrapeRunner
-import time
 
 DEALERS = [
     # San Jose
@@ -33,7 +35,7 @@ DEALER_SCRAPERS = {
 ACTIVE_MARKETPLACES = [craigslist.scrape]
 
 
-def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1):
+def run_scraper(dry_run: bool = False, max_pages: Optional[int] = None, log_interval_minutes: float = 1) -> None:
     supabase = None
     if not dry_run:
         supabase = get_supabase()
@@ -45,13 +47,13 @@ def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1):
 
     # Progress is logged at most once per log_interval_minutes instead of
     # once per saved listing, to keep GitHub Actions logs readable.
-    progress = {"saved": 0, "inserted": 0, "updated": 0, "skipped": 0, "last_log": time.monotonic()}
+    progress = {"saved": 0, "inserted": 0, "updated": 0, "skipped": 0, "invalid": 0, "last_log": time.monotonic()}
     log_interval_seconds = log_interval_minutes * 60
 
     print(f"Fetching saved searches... {'(DRY RUN MODE)' if dry_run else ''}")
 
     # Only fetch from DB if NOT a dry run
-    if not dry_run:
+    if not dry_run and supabase is not None:
         response = (
             supabase.table("saved_searches").select("*").eq("is_active", True).execute()
         )
@@ -66,7 +68,8 @@ def run_scraper(dry_run=False, max_pages=None, log_interval_minutes=1):
     print(
         f"Done. Processed {progress['saved']} listings this run: "
         f"{progress['inserted']} new, {progress['updated']} already existed (re-confirmed), "
-        f"{progress['skipped']} skipped (cross-dealer link collision)."
+        f"{progress['skipped']} skipped (cross-dealer link collision), "
+        f"{progress['invalid']} invalid (failed validation)."
     )
 
 

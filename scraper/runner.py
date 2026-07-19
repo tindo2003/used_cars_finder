@@ -1,5 +1,6 @@
 import random
 import time
+from typing import Any, Callable, Dict, List, Optional
 
 from options import ScrapeOptions
 
@@ -13,14 +14,27 @@ class ScrapeRunner:
     real websites or a real database.
     """
 
-    def __init__(self, db_client, dealers, dealer_scrapers, active_marketplaces, sleep_fn=time.sleep):
+    def __init__(
+        self,
+        db_client: Any,
+        dealers: List[Dict[str, Any]],
+        dealer_scrapers: Dict[str, Callable[..., List[Dict[str, Any]]]],
+        active_marketplaces: List[Callable[..., List[Dict[str, Any]]]],
+        sleep_fn: Callable[[float], None] = time.sleep,
+    ) -> None:
         self.db_client = db_client
         self.dealers = dealers
         self.dealer_scrapers = dealer_scrapers
         self.active_marketplaces = active_marketplaces
         self.sleep_fn = sleep_fn
 
-    def run_marketplace_searches(self, searches, dry_run, progress, log_interval_seconds):
+    def run_marketplace_searches(
+        self,
+        searches: List[Dict[str, Any]],
+        dry_run: bool,
+        progress: Dict[str, Any],
+        log_interval_seconds: float,
+    ) -> None:
         for search in searches:
             make = search.get("make") or ""
             model = search.get("model") or ""
@@ -35,7 +49,13 @@ class ScrapeRunner:
                 cars_found = provider_func(options)
                 self.db_client.bulk_save(cars_found, dry_run, progress, log_interval_seconds)
 
-    def run_dealer_scrapes(self, dry_run, progress, log_interval_seconds, max_pages=None):
+    def run_dealer_scrapes(
+        self,
+        dry_run: bool,
+        progress: Dict[str, Any],
+        log_interval_seconds: float,
+        max_pages: Optional[int] = None,
+    ) -> None:
         for dealer in self.dealers:
             scraper_func = self.dealer_scrapers.get(dealer["platform"])
             if not scraper_func:
@@ -55,6 +75,13 @@ class ScrapeRunner:
             cars_found = scraper_func(dealer["url"], options)
             self.db_client.bulk_save(cars_found, dry_run, progress, log_interval_seconds)
 
-    def run(self, searches, dry_run, progress, log_interval_seconds, max_pages=None):
+    def run(
+        self,
+        searches: List[Dict[str, Any]],
+        dry_run: bool,
+        progress: Dict[str, Any],
+        log_interval_seconds: float,
+        max_pages: Optional[int] = None,
+    ) -> None:
         self.run_marketplace_searches(searches, dry_run, progress, log_interval_seconds)
         self.run_dealer_scrapes(dry_run, progress, log_interval_seconds, max_pages)

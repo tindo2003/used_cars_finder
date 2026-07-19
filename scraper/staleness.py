@@ -17,15 +17,19 @@ staleness; not otherwise corrected for here.
 """
 
 from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
-from db import DbClient
-from utils.timestamps import parse_timestamp
+from db import DbClient, read_listings
 
 DEFAULT_STALE_THRESHOLD_DAYS = 90
 EXPIRED_STATUS = "expired"
 
 
-def expire_stale_listings(supabase, stale_threshold_days=DEFAULT_STALE_THRESHOLD_DAYS, now=None):
+def expire_stale_listings(
+    supabase: Any,
+    stale_threshold_days: int = DEFAULT_STALE_THRESHOLD_DAYS,
+    now: Optional[datetime] = None,
+) -> int:
     """
     Marks status="expired" on every active listing whose last_seen_at is
     older than stale_threshold_days. Expired listings are excluded
@@ -40,13 +44,12 @@ def expire_stale_listings(supabase, stale_threshold_days=DEFAULT_STALE_THRESHOLD
     cutoff = now - timedelta(days=stale_threshold_days)
 
     listings_db = DbClient(supabase, table="listings")
-    listings = listings_db.read(status="active")
+    listings = read_listings(supabase, status="active")
 
     expired_count = 0
     for listing in listings:
-        last_seen = parse_timestamp(listing.get("last_seen_at"))
-        if last_seen is not None and last_seen < cutoff:
-            listings_db.update({"id": listing["id"]}, {"status": EXPIRED_STATUS})
+        if listing.last_seen_at is not None and listing.last_seen_at < cutoff:
+            listings_db.update({"id": listing.id}, {"status": EXPIRED_STATUS})
             expired_count += 1
 
     return expired_count

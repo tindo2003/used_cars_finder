@@ -13,15 +13,17 @@ scraper/
   main.py            CLI entrypoint for scraping (runs every 15 min via .github/workflows/scraper.yml)
   notify.py           CLI entrypoint for the daily notification check (.github/workflows/notify.yml)
   runner.py           ScrapeRunner -- orchestrates "call a scraper, call the DB saver", testable via fakes
-  db.py               DbClient -- generic CRUD over any Supabase table (create/read/update/delete/upsert)
+  db.py               DbClient -- generic CRUD over any Supabase table (create/read/update/delete/upsert); read_listings() is the typed read boundary
+  models.py           Listing + SavedSearch Pydantic v2 models -- the only place raw dicts get validated (see Pydantic decision below)
   options.py          ScrapeOptions dataclass -- shared config passed into every provider's scrape()
   notifications.py    matches() + notify_matches() -- saved-search matching, batched digest emails via Resend
   deals.py            compute_deal_score()/is_good_deal()/update_deal_scores() -- the "good deal" heuristic
   duplicates.py        cross-marketplace + same-VIN duplicate detection, writes duplicate_of
   staleness.py         expire_stale_listings() -- marks status="expired" past a configurable last-seen threshold
   utils/              small shared pure-function helpers: pagination.py (page_did_not_advance), timestamps.py (parse_timestamp)
-  providers/          craigslist.py, dealeron.py, dealerinspire.py (ebay.py exists but is NOT wired in -- see below)
-  tests/              112 tests, fakes.py has a shared in-memory Supabase stand-in with real filter semantics
+  providers/          craigslist.py, dealeron.py, dealerinspire.py (ebay.py exists but is NOT wired in -- see below); still return plain dicts, not Listing (see Pydantic decision)
+  mypy.ini            disallow_untyped_defs on source modules, relaxed for tests/
+  tests/              133 tests, fakes.py has a shared in-memory Supabase stand-in with real filter semantics
 
 app/
   page.tsx            The entire frontend (single page): search/filter/sort, listing cards, save-search flow,
@@ -47,9 +49,10 @@ migrations/           Run manually in the Supabase SQL editor -- nothing here ap
 .github/workflows/
   scraper.yml         every 15 min, installs Playwright, runs main.py
   notify.yml          once daily (15:00 UTC / 8am Pacific), no Playwright needed, runs notify.py
+  typecheck.yml       push/PR on scraper/** changes -- runs mypy, no Playwright install needed
 ```
 
-Run tests: `cd scraper && python3 -m pytest tests/ -q` (backend) and `npx vitest run` (frontend, from repo root). Run scraper locally: `cd scraper && python3 main.py --dry-run --max-pages 1` (fast, no DB writes). Local DB access needs `scraper/.env` with `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (service role), `RESEND_API_KEY` -- not committed, gitignored via the `.env*` rule.
+Run tests: `cd scraper && python3 -m pytest tests/ -q` (backend) and `npx vitest run` (frontend, from repo root). Run scraper locally: `cd scraper && python3 main.py --dry-run --max-pages 1` (fast, no DB writes). Type-check: `mypy scraper --config-file scraper/mypy.ini` (from repo root). Local DB access needs `scraper/.env` with `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (service role), `RESEND_API_KEY` -- not committed, gitignored via the `.env*` rule.
 
 ## Key decisions already made (don't re-litigate without a reason)
 
@@ -63,6 +66,7 @@ Run tests: `cd scraper && python3 -m pytest tests/ -q` (backend) and `npx vitest
 - **Pagination has a stall guard** (`pagination.page_did_not_advance`) after a real bug where "Next" clicks could succeed without the page actually changing, causing the same vehicles to be re-scraped up to hundreds of times in one run. Tested specifically to confirm genuine page-to-page advancing (including partial inventory overlap) is never mistaken for a stall.
 - **Stale listings expire after a configurable window (default 90 days) of not being reconfirmed** (`scraper/staleness.py`, built 2026-07-20, user-directed design). `db.py`'s upsert stamps `last_seen_at` on every insert/update; `notify.py` runs `expire_stale_listings()` first (before dup/deal-score/notify steps) each day, marking `status="expired"` on anything past the threshold -- which then falls out of every other read for free (frontend, deals.py, duplicates.py, notifications.py all already filter on `status="active"`). Working assumption (user's, confirmed intentional): a listing the scraper keeps re-seeing is more likely still available than one it hasn't re-seen in months -- this is a proxy for "probably sold," not an actual delisting check (nothing verifies removal from the source). `last_seen_at` is also wired into `deals.ranking_key` and the frontend's listings query as a **tiebreaker only** (most-recently-seen wins ties), never the primary sort -- explicit user choice. **Known asymmetry:** far more reliable for dealer listings (full-inventory re-scrape every 15-min run) than Craigslist (`runner.py` only re-searches make/models with a currently *active* saved search, so a Craigslist listing can go stale just because no one's searching for it, not because it sold) -- user explicitly accepted this as an acceptable outlier rather than building Craigslist-specific compensation.
 - **Dealer coverage**: 11 dealers currently in `main.py`'s `DEALERS` list (San Jose/Santa Clara/Sunnyvale/Fremont/Newark cluster; Lexus Stevens Creek added 2026-07-20). More candidates with unverified platforms: `research/bay-area-dealer-candidates.md`.
+- **Pydantic + mypy, wired up 2026-07-20.** Prompted by a tangent about Python's lack of real enforcement behind `_helper` naming conventions (`scraper/` had zero type hints at the time). User explicitly chose Pydantic (real runtime validation) over a plain-`TypedDict` alternative (static-only, no runtime cost) specifically so bad scraped data gets caught the moment it enters the system rather than silently propagating as wrong-shaped `None`s into deal-scoring/notification logic. Scoped deliberately to contain the ~105-call-site blast radius: **validation happens only at the DB boundary** (`db.py`'s `bulk_save`/`upsert`/`read_listings`), not inside the scrapers -- `providers/*.py` and `runner.py` still pass plain dicts around, converted to a validated `Listing` only right before/after touching Supabase. `bulk_save` skips (doesn't crash on) any car that fails `Listing` validation, logging it and counting it in `progress["invalid"]`. `mypy` runs in CI (`typecheck.yml`, own workflow since it needs no Playwright) with `disallow_untyped_defs` on every source module; verified clean, plus the full 133-test suite passing and all 763 real production listings re-validating with 0 failures through `read_listings()` (read-only check, no writes).
 
 ## Known open items (not yet decided or built)
 

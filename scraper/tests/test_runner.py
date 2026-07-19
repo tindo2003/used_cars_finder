@@ -48,7 +48,12 @@ def test_run_marketplace_searches_calls_provider_with_search_filters():
 
 def test_run_marketplace_searches_skips_searches_with_no_make_or_model():
     calls = []
-    runner, db_client = make_runner(active_marketplaces=[lambda options: calls.append(options) or []])
+
+    def fake_provider(options):
+        calls.append(options)
+        return []
+
+    runner, db_client = make_runner(active_marketplaces=[fake_provider])
     searches = [{"make": None, "model": None, "max_price": 20000}]
 
     runner.run_marketplace_searches(searches, dry_run=False, progress=make_progress(), log_interval_seconds=60)
@@ -59,12 +64,16 @@ def test_run_marketplace_searches_skips_searches_with_no_make_or_model():
 
 def test_run_marketplace_searches_calls_every_active_marketplace():
     calls = []
-    runner, db_client = make_runner(
-        active_marketplaces=[
-            lambda options: calls.append("provider-a") or [],
-            lambda options: calls.append("provider-b") or [],
-        ]
-    )
+
+    def provider_a(options):
+        calls.append("provider-a")
+        return []
+
+    def provider_b(options):
+        calls.append("provider-b")
+        return []
+
+    runner, db_client = make_runner(active_marketplaces=[provider_a, provider_b])
     searches = [{"make": "Honda", "model": "Civic"}]
 
     runner.run_marketplace_searches(searches, dry_run=False, progress=make_progress(), log_interval_seconds=60)

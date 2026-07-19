@@ -1,4 +1,5 @@
 from duplicates import compute_duplicate_map, find_duplicate_groups, update_duplicate_flags
+from models import Listing
 from tests.fakes import FakeSupabase
 
 
@@ -14,7 +15,15 @@ def make_listing(**overrides):
         "status": "active",
     }
     listing.update(overrides)
-    return listing
+    return Listing.model_validate(listing)
+
+
+def make_listing_row(**overrides):
+    """Same defaults as make_listing(), but as a plain dict -- for
+    seeding FakeSupabase, which stores/returns rows exactly as Supabase
+    would (see read_listings(), the boundary that validates them back
+    into a Listing)."""
+    return make_listing(**overrides).model_dump(exclude_none=True)
 
 
 # --- find_duplicate_groups ---
@@ -27,7 +36,7 @@ def test_groups_the_same_vehicle_across_two_marketplaces():
     groups = find_duplicate_groups([craigslist_listing, dealer_listing])
 
     assert len(groups) == 1
-    assert {listing["id"] for listing in groups[0]} == {"cl-1", "dealer-1"}
+    assert {listing.id for listing in groups[0]} == {"cl-1", "dealer-1"}
 
 
 def test_does_not_group_listings_from_the_same_source():
@@ -106,7 +115,7 @@ def test_groups_across_three_marketplaces():
     groups = find_duplicate_groups([craigslist_listing, dealeron_listing, dealerinspire_listing])
 
     assert len(groups) == 1
-    assert {listing["id"] for listing in groups[0]} == {"cl-1", "dealeron-1", "dealerinspire-1"}
+    assert {listing.id for listing in groups[0]} == {"cl-1", "dealeron-1", "dealerinspire-1"}
 
 
 def test_unrelated_listings_are_not_grouped():
@@ -131,7 +140,7 @@ def test_same_vin_matches_across_the_same_marketplace_source():
     groups = find_duplicate_groups([honda_store, ford_store])
 
     assert len(groups) == 1
-    assert {listing["id"] for listing in groups[0]} == {"honda-1", "ford-1"}
+    assert {listing.id for listing in groups[0]} == {"honda-1", "ford-1"}
 
 
 def test_same_vin_matches_even_outside_the_fuzzy_price_and_mileage_windows():
@@ -225,8 +234,8 @@ def test_map_omits_canonical_and_unmatched_listings():
 
 
 def test_update_duplicate_flags_writes_duplicate_of_for_the_non_canonical_row():
-    craigslist_listing = make_listing(id="cl-1", marketplace_source="craigslist", vin=None)
-    dealer_listing = make_listing(id="dealer-1", marketplace_source="dealeron", vin="1HGCM82633A004352")
+    craigslist_listing = make_listing_row(id="cl-1", marketplace_source="craigslist", vin=None)
+    dealer_listing = make_listing_row(id="dealer-1", marketplace_source="dealeron", vin="1HGCM82633A004352")
     supabase = FakeSupabase(initial_data={"listings": [craigslist_listing, dealer_listing]})
 
     count = update_duplicate_flags(supabase)
@@ -241,10 +250,10 @@ def test_update_duplicate_flags_clears_a_previously_flagged_listing_no_longer_ma
     # Simulates a listing that was flagged as a duplicate on a prior run
     # (price has since diverged past the tolerance) -- the flag should
     # be cleared, not left stale.
-    stale_duplicate = make_listing(
+    stale_duplicate = make_listing_row(
         id="cl-1", marketplace_source="craigslist", price=15000, duplicate_of="dealer-1"
     )
-    dealer_listing = make_listing(id="dealer-1", marketplace_source="dealeron", price=20000)
+    dealer_listing = make_listing_row(id="dealer-1", marketplace_source="dealeron", price=20000)
     supabase = FakeSupabase(initial_data={"listings": [stale_duplicate, dealer_listing]})
 
     update_duplicate_flags(supabase)
@@ -257,8 +266,8 @@ def test_update_duplicate_flags_only_considers_active_listings():
     supabase = FakeSupabase(
         initial_data={
             "listings": [
-                make_listing(id="cl-1", marketplace_source="craigslist", status="active"),
-                make_listing(id="dealer-1", marketplace_source="dealeron", status="sold"),
+                make_listing_row(id="cl-1", marketplace_source="craigslist", status="active"),
+                make_listing_row(id="dealer-1", marketplace_source="dealeron", status="sold"),
             ]
         }
     )

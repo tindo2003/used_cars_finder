@@ -1,9 +1,11 @@
 import os
+from typing import Any, Callable, Dict, List, Optional, cast
 
 import requests
 
-from db import DbClient
+from db import DbClient, read_listings
 from deals import ranking_key
+from models import Listing, SavedSearch
 from utils.timestamps import format_relative_time
 
 RESEND_API_URL = "https://api.resend.com/emails"
@@ -18,17 +20,14 @@ MARKETPLACE_LABELS = {
 }
 
 
-def _seller_label(listing):
+def _seller_label(listing: Listing) -> Optional[str]:
     """Mirrors app/page.tsx's getSellerLabel for consistency with the UI."""
-    dealer_name = listing.get("dealer_name")
-    if dealer_name:
-        city = listing.get("city")
-        return f"{dealer_name} · {city}" if city else dealer_name
-    marketplace_source = listing.get("marketplace_source")
-    return MARKETPLACE_LABELS.get(marketplace_source, marketplace_source)
+    if listing.dealer_name:
+        return f"{listing.dealer_name} · {listing.city}" if listing.city else listing.dealer_name
+    return MARKETPLACE_LABELS.get(listing.marketplace_source or "", listing.marketplace_source)
 
 
-def matches(listing, search):
+def matches(listing: Listing, search: SavedSearch) -> bool:
     """
     Does `listing` satisfy every filter set on `search`? A filter that
     isn't set on the search is ignored. A filter that IS set but whose
@@ -39,59 +38,47 @@ def matches(listing, search):
     unset matches every listing -- notify_matches' top_n cap is what
     keeps that from emailing the entire table.
     """
-    if search.get("make") and search["make"].lower() != (listing.get("make") or "").lower():
+    if search.make and search.make.lower() != (listing.make or "").lower():
         return False
-    if search.get("model") and search["model"].lower() not in (listing.get("model") or "").lower():
+    if search.model and search.model.lower() not in (listing.model or "").lower():
+        return False
+    if search.max_price is not None and listing.price is not None and float(listing.price) > float(search.max_price):
+        return False
+    if search.min_year is not None and listing.model_year is not None and listing.model_year < search.min_year:
+        return False
+    if search.max_mileage is not None and listing.mileage is not None and listing.mileage > search.max_mileage:
         return False
     if (
-        search.get("max_price") is not None
-        and listing.get("price") is not None
-        and float(listing["price"]) > float(search["max_price"])
+        search.transmission
+        and listing.transmission
+        and search.transmission.lower() != listing.transmission.lower()
     ):
         return False
     if (
-        search.get("min_year") is not None
-        and listing.get("model_year") is not None
-        and listing["model_year"] < search["min_year"]
-    ):
-        return False
-    if (
-        search.get("max_mileage") is not None
-        and listing.get("mileage") is not None
-        and listing["mileage"] > search["max_mileage"]
-    ):
-        return False
-    if (
-        search.get("transmission")
-        and listing.get("transmission")
-        and search["transmission"].lower() != listing["transmission"].lower()
-    ):
-        return False
-    if (
-        search.get("seller_type")
-        and listing.get("seller_type")
-        and search["seller_type"].lower() != listing["seller_type"].lower()
+        search.seller_type
+        and listing.seller_type
+        and search.seller_type.lower() != listing.seller_type.lower()
     ):
         return False
     return True
 
 
-def _format_listing_html(listing):
-    price = listing.get("price")
+def _format_listing_html(listing: Listing) -> str:
+    price = listing.price
     price_str = f"${float(price):,.0f}" if price is not None else "N/A"
-    mileage = listing.get("mileage")
+    mileage = listing.mileage
     mileage_str = f"{mileage:,} mi" if mileage is not None else "mileage unknown"
-    title = f"{listing.get('model_year')} {listing.get('make')} {listing.get('model')}"
-    last_updated = format_relative_time(listing.get("last_seen_at"))
+    title = f"{listing.model_year} {listing.make} {listing.model}"
+    last_updated = format_relative_time(listing.last_seen_at)
     last_updated_part = f" — {last_updated}" if last_updated else ""
     return (
         f"<li><strong>{title}</strong> — {price_str} ({mileage_str}) "
         f"— {_seller_label(listing)}{last_updated_part} — "
-        f'<a href="{listing.get("original_url")}">View listing</a></li>'
+        f'<a href="{listing.original_url}">View listing</a></li>'
     )
 
 
-def send_digest_email(to_email, listings):
+def send_digest_email(to_email: str, listings: List[Listing]) -> Dict[str, Any]:
     """Send one email listing every car in `listings` (already capped to top_n by the caller)."""
     api_key = os.environ.get("RESEND_API_KEY")
     if not api_key:
@@ -112,10 +99,14 @@ def send_digest_email(to_email, listings):
         },
     )
     res.raise_for_status()
-    return res.json()
+    return cast(Dict[str, Any], res.json())
 
 
-def notify_matches(supabase, send_email_fn=None, top_n=DEFAULT_TOP_N):
+def notify_matches(
+    supabase: Any,
+    send_email_fn: Optional[Callable[[str, List[Listing]], Any]] = None,
+    top_n: int = DEFAULT_TOP_N,
+) -> int:
     """
     For every active saved search, find listings that match it and
     haven't already been notified (tracked in notification_history),
@@ -136,32 +127,34 @@ def notify_matches(supabase, send_email_fn=None, top_n=DEFAULT_TOP_N):
     """
     send_email_fn = send_email_fn or send_digest_email
 
-    listings_db = DbClient(supabase, table="listings")
     searches_db = DbClient(supabase, table="saved_searches")
     history_db = DbClient(supabase, table="notification_history")
 
-    searches = [s for s in searches_db.read(is_active=True) if s.get("email")]
-    listings = [listing for listing in listings_db.read(status="active") if not listing.get("duplicate_of")]
+    searches = [SavedSearch.model_validate(row) for row in searches_db.read(is_active=True)]
+    listings = [listing for listing in read_listings(supabase, status="active") if not listing.duplicate_of]
     already_notified = {
         (row["saved_search_id"], row["listing_id"]) for row in history_db.read()
     }
 
     emails_sent = 0
     for search in searches:
+        if not search.email:
+            continue
+
         new_matches = [
             listing
             for listing in listings
-            if (search["id"], listing["id"]) not in already_notified and matches(listing, search)
+            if (search.id, listing.id) not in already_notified and matches(listing, search)
         ]
         if not new_matches:
             continue
 
         top_matches = sorted(new_matches, key=lambda listing: ranking_key(listing, listings))[:top_n]
 
-        send_email_fn(search["email"], top_matches)
+        send_email_fn(search.email, top_matches)
         for listing in top_matches:
-            history_db.create({"saved_search_id": search["id"], "listing_id": listing["id"]})
-            already_notified.add((search["id"], listing["id"]))
+            history_db.create({"saved_search_id": search.id, "listing_id": listing.id})
+            already_notified.add((search.id, listing.id))
         emails_sent += 1
 
     return emails_sent

@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+from models import Listing, SavedSearch
 from notifications import DEFAULT_TOP_N, _format_listing_html, _seller_label, matches, notify_matches
 from tests.fakes import FakeSupabase
 
@@ -18,7 +19,13 @@ def make_search(**overrides):
         "seller_type": None,
     }
     search.update(overrides)
-    return search
+    return SavedSearch.model_validate(search)
+
+
+def make_search_row(**overrides):
+    """Same defaults as make_search(), but as a plain dict -- for
+    seeding FakeSupabase's saved_searches table."""
+    return make_search(**overrides).model_dump(exclude_none=True)
 
 
 def make_listing(**overrides):
@@ -34,7 +41,15 @@ def make_listing(**overrides):
         "seller_type": "dealer",
     }
     listing.update(overrides)
-    return listing
+    return Listing.model_validate(listing)
+
+
+def make_listing_row(**overrides):
+    """Same defaults as make_listing(), but as a plain dict -- for
+    seeding FakeSupabase, which stores/returns rows exactly as Supabase
+    would (see read_listings(), the boundary that validates them back
+    into a Listing)."""
+    return make_listing(**overrides).model_dump(exclude_none=True)
 
 
 # --- matches() ---
@@ -143,8 +158,8 @@ def test_format_listing_html_omits_last_updated_when_last_seen_at_is_missing():
 def test_notify_matches_sends_one_digest_email_and_records_history():
     supabase = FakeSupabase(
         initial_data={
-            "saved_searches": [make_search(max_price=20000)],
-            "listings": [make_listing(price=15000)],
+            "saved_searches": [make_search_row(max_price=20000)],
+            "listings": [make_listing_row(price=15000)],
         }
     )
     digests = []
@@ -162,8 +177,8 @@ def test_notify_matches_sends_one_digest_email_and_records_history():
 def test_notify_matches_sends_nothing_when_no_new_matches():
     supabase = FakeSupabase(
         initial_data={
-            "saved_searches": [make_search()],
-            "listings": [make_listing()],
+            "saved_searches": [make_search_row()],
+            "listings": [make_listing_row()],
             "notification_history": [{"saved_search_id": "search-1", "listing_id": "listing-1"}],
         }
     )
@@ -178,8 +193,8 @@ def test_notify_matches_sends_nothing_when_no_new_matches():
 def test_notify_matches_skips_non_matching_listings():
     supabase = FakeSupabase(
         initial_data={
-            "saved_searches": [make_search(make="Honda")],
-            "listings": [make_listing(make="Toyota")],
+            "saved_searches": [make_search_row(make="Honda")],
+            "listings": [make_listing_row(make="Toyota")],
         }
     )
     digests = []
@@ -193,8 +208,8 @@ def test_notify_matches_skips_non_matching_listings():
 def test_notify_matches_ignores_inactive_saved_searches():
     supabase = FakeSupabase(
         initial_data={
-            "saved_searches": [make_search(is_active=False)],
-            "listings": [make_listing()],
+            "saved_searches": [make_search_row(is_active=False)],
+            "listings": [make_listing_row()],
         }
     )
     digests = []
@@ -208,8 +223,8 @@ def test_notify_matches_ignores_inactive_saved_searches():
 def test_notify_matches_ignores_searches_without_an_email():
     supabase = FakeSupabase(
         initial_data={
-            "saved_searches": [make_search(email=None)],
-            "listings": [make_listing()],
+            "saved_searches": [make_search_row(email=None)],
+            "listings": [make_listing_row()],
         }
     )
     digests = []
@@ -224,10 +239,10 @@ def test_notify_matches_sends_separate_digests_for_separate_searches():
     supabase = FakeSupabase(
         initial_data={
             "saved_searches": [
-                make_search(id="search-1", email="a@example.com"),
-                make_search(id="search-2", email="b@example.com"),
+                make_search_row(id="search-1", email="a@example.com"),
+                make_search_row(id="search-2", email="b@example.com"),
             ],
-            "listings": [make_listing()],
+            "listings": [make_listing_row()],
         }
     )
     digests = []
@@ -242,10 +257,10 @@ def test_notify_matches_sends_separate_digests_for_separate_searches():
 
 
 def test_notify_matches_batches_all_new_matches_into_one_email():
-    listings = [make_listing(id=f"listing-{i}", price=10000 + i * 1000) for i in range(4)]
+    listings = [make_listing_row(id=f"listing-{i}", price=10000 + i * 1000) for i in range(4)]
     supabase = FakeSupabase(
         initial_data={
-            "saved_searches": [make_search(max_price=100000)],
+            "saved_searches": [make_search_row(max_price=100000)],
             "listings": listings,
         }
     )
@@ -259,10 +274,10 @@ def test_notify_matches_batches_all_new_matches_into_one_email():
 
 
 def test_notify_matches_caps_digest_at_default_top_n():
-    listings = [make_listing(id=f"listing-{i}", price=10000 + i * 1000) for i in range(DEFAULT_TOP_N + 5)]
+    listings = [make_listing_row(id=f"listing-{i}", price=10000 + i * 1000) for i in range(DEFAULT_TOP_N + 5)]
     supabase = FakeSupabase(
         initial_data={
-            "saved_searches": [make_search()],  # no filters -- matches everything
+            "saved_searches": [make_search_row()],  # no filters -- matches everything
             "listings": listings,
         }
     )
@@ -275,10 +290,10 @@ def test_notify_matches_caps_digest_at_default_top_n():
 
 
 def test_notify_matches_digest_contains_the_cheapest_listings_first():
-    listings = [make_listing(id=f"listing-{i}", price=10000 + i * 1000) for i in range(DEFAULT_TOP_N + 5)]
+    listings = [make_listing_row(id=f"listing-{i}", price=10000 + i * 1000) for i in range(DEFAULT_TOP_N + 5)]
     supabase = FakeSupabase(
         initial_data={
-            "saved_searches": [make_search()],
+            "saved_searches": [make_search_row()],
             "listings": listings,
         }
     )
@@ -286,16 +301,16 @@ def test_notify_matches_digest_contains_the_cheapest_listings_first():
 
     notify_matches(supabase, send_email_fn=lambda email, listings: digests.append(listings))
 
-    prices = [listing["price"] for listing in digests[0]]
+    prices = [listing.price for listing in digests[0] if listing.price is not None]
     assert prices == sorted(prices)
     assert prices[0] == 10000
 
 
 def test_notify_matches_respects_a_custom_top_n():
-    listings = [make_listing(id=f"listing-{i}", price=10000 + i * 1000) for i in range(10)]
+    listings = [make_listing_row(id=f"listing-{i}", price=10000 + i * 1000) for i in range(10)]
     supabase = FakeSupabase(
         initial_data={
-            "saved_searches": [make_search()],
+            "saved_searches": [make_search_row()],
             "listings": listings,
         }
     )
@@ -307,10 +322,10 @@ def test_notify_matches_respects_a_custom_top_n():
 
 
 def test_notify_matches_records_history_for_every_listing_in_the_digest():
-    listings = [make_listing(id=f"listing-{i}", price=10000 + i * 1000) for i in range(3)]
+    listings = [make_listing_row(id=f"listing-{i}", price=10000 + i * 1000) for i in range(3)]
     supabase = FakeSupabase(
         initial_data={
-            "saved_searches": [make_search()],
+            "saved_searches": [make_search_row()],
             "listings": listings,
         }
     )
@@ -322,10 +337,10 @@ def test_notify_matches_records_history_for_every_listing_in_the_digest():
 
 
 def test_notify_matches_next_run_surfaces_the_next_cheapest_once_top_n_already_notified():
-    listings = [make_listing(id=f"listing-{i}", price=10000 + i * 1000) for i in range(5)]
+    listings = [make_listing_row(id=f"listing-{i}", price=10000 + i * 1000) for i in range(5)]
     supabase = FakeSupabase(
         initial_data={
-            "saved_searches": [make_search()],
+            "saved_searches": [make_search_row()],
             "listings": listings,
         }
     )
@@ -337,4 +352,4 @@ def test_notify_matches_next_run_surfaces_the_next_cheapest_once_top_n_already_n
     # listing-0/1/2 already notified in the first run; the second run
     # should surface listing-3 and listing-4, the next cheapest.
     assert len(digests) == 1
-    assert {listing["id"] for listing in digests[0]} == {"listing-3", "listing-4"}
+    assert {listing.id for listing in digests[0]} == {"listing-3", "listing-4"}

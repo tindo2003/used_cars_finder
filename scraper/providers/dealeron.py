@@ -1,13 +1,34 @@
 from playwright.sync_api import sync_playwright
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 import base64
 import random
+from typing import Any, Dict, List, Optional
 
 from options import ScrapeOptions
 from utils.pagination import page_did_not_advance
 
 
-def extract_price(v):
+def _attr(tag: Tag, name: str) -> Optional[str]:
+    """
+    HTML attributes are technically str | list[str] | None in bs4's own
+    typing (an attribute like class can be multi-valued) -- every
+    attribute this scraper reads is single-valued in practice, so this
+    normalizes to a plain Optional[str].
+    """
+    value = tag.get(name)
+    if isinstance(value, list):
+        return value[0] if value else None
+    return value
+
+
+def _find_tag(parent: Tag, name: str, class_: str) -> Optional[Tag]:
+    """.find() can return a NavigableString instead of a Tag; every use
+    here wants a Tag specifically (to read attributes off of)."""
+    found = parent.find(name, class_=class_)
+    return found if isinstance(found, Tag) else None
+
+
+def extract_price(v: Tag) -> float:
     """
     data-dotagging-item-price is a third-party analytics tag and is
     unreliable (observed wildly wrong values). The real price lives in
@@ -15,7 +36,7 @@ def extract_price(v):
     "Selling Price:25888.0;...;calc_INTERNET PRICE:25973.0;...". Prefer
     that field's Internet Price, which matches the site's displayed price.
     """
-    pricelib = v.get("data-pricelib")
+    pricelib = _attr(v, "data-pricelib")
     if pricelib:
         try:
             decoded = base64.b64decode(pricelib).decode("utf-8")
@@ -31,54 +52,57 @@ def extract_price(v):
             pass
 
     # Fall back to the analytics tag if pricelib is missing/unparseable
-    return float(v.get("data-dotagging-item-price", "0"))
+    return float(_attr(v, "data-dotagging-item-price") or "0")
 
 
-def extract_mileage(v):
-    odometer = v.get("data-odometer")
+def extract_mileage(v: Tag) -> Optional[int]:
+    odometer = _attr(v, "data-odometer")
     if odometer and odometer.isdigit():
         return int(odometer)
     return None
 
 
-def extract_posted_at(v):
+def extract_posted_at(v: Tag) -> Optional[str]:
     # data-dotagging-item-inventory-date is "YYYY/MM/DD"; Postgres accepts
     # "YYYY-MM-DD" as a valid timestamp/date literal directly.
-    inventory_date = v.get("data-dotagging-item-inventory-date")
+    inventory_date = _attr(v, "data-dotagging-item-inventory-date")
     if inventory_date:
         return inventory_date.replace("/", "-")
     return None
 
 
-def extract_vehicle_data(v, base_url, city=None, dealer_name=None):
+def extract_vehicle_data(
+    v: Tag, base_url: str, city: Optional[str] = None, dealer_name: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
     """
     Extracts vehicle details from a BeautifulSoup element.
     v: The BeautifulSoup element representing the vehicle card div.
     """
     try:
         # Extract from data attributes
-        make = v.get("data-make", "Unknown")
-        model = v.get("data-model", "Unknown")
-        year = int(v.get("data-year", 0))
+        make = _attr(v, "data-make") or "Unknown"
+        model = _attr(v, "data-model") or "Unknown"
+        year = int(_attr(v, "data-year") or 0)
 
         price = extract_price(v)
 
         # Extract Link (The specific structure from your HTML)
-        link_elem = v.find("a", class_="hero-carousel__item--viewvehicle")
-        link = link_elem.get("href", "#") if link_elem else "#"
+        link_elem = _find_tag(v, "a", "hero-carousel__item--viewvehicle")
+        link = (_attr(link_elem, "href") if link_elem else None) or "#"
 
         # Extract Image
-        img_elem = v.find("img", class_="hero-carousel__background-image--grid")
-        img_src = img_elem.get("src") if img_elem else None
+        img_elem = _find_tag(v, "img", "hero-carousel__background-image--grid")
+        img_src = _attr(img_elem, "src") if img_elem else None
 
         # If the src starts with /, prepend the base_url
+        photo_url: Optional[str]
         if img_src and img_src.startswith("/"):
             photo_url = f"{base_url.rstrip('/')}{img_src}"
         else:
             photo_url = img_src
 
         # VIN (useful for preventing duplicates in the database)
-        vin = v.get("data-vin") or None
+        vin = _attr(v, "data-vin") or None
 
         return {
             "marketplace_source": "dealeron",
@@ -86,13 +110,13 @@ def extract_vehicle_data(v, base_url, city=None, dealer_name=None):
             "vin": vin,
             "make": make,
             "model": model,
-            "trim": v.get("data-trim") or None,
+            "trim": _attr(v, "data-trim") or None,
             "model_year": year,
             "price": price,
             "mileage": extract_mileage(v),
             "seller_type": "dealer",
-            "transmission": v.get("data-trans") or None,
-            "fuel_type": v.get("data-fueltype") or None,
+            "transmission": _attr(v, "data-trans") or None,
+            "fuel_type": _attr(v, "data-fueltype") or None,
             "city": city,
             "dealer_name": dealer_name,
             "posted_at": extract_posted_at(v),
@@ -103,12 +127,12 @@ def extract_vehicle_data(v, base_url, city=None, dealer_name=None):
         return None
 
 
-def scrape(base_url, options: ScrapeOptions = None):
+def scrape(base_url: str, options: Optional[ScrapeOptions] = None) -> List[Dict[str, Any]]:
     options = options or ScrapeOptions()
     max_pages = options.max_pages or 300
 
     print(f"--- DealerOn (Browser): {base_url} ---")
-    results = []
+    results: List[Dict[str, Any]] = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
