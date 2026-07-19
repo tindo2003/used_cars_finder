@@ -98,11 +98,27 @@ def scrape(base_url, options: ScrapeOptions = None):
         # Results use numbered pagination (a "Page X of Y" widget), not
         # infinite scroll. Each "Next" click replaces the current page's
         # cards, so we parse after every click rather than accumulating DOM.
+        previous_page_vins = None
         for page_count in range(1, max_pages + 1):
             state = page.query_selector(".pagination-state")
             print(f"--- Scraping Page {page_count} ({state.inner_text() if state else '?'}) ---")
 
             cards = page.query_selector_all(".result-wrap")
+
+            # Same guard as dealeron.py: a "Next" click can succeed without
+            # the page actually changing. If this page has the exact same
+            # vehicles as the previous one, stop instead of re-scraping the
+            # same cars up to max_pages times.
+            current_page_vins = frozenset(
+                vin
+                for card in cards
+                if (vin := json.loads(card.get_attribute("data-vehicle") or "{}").get("vin"))
+            )
+            if previous_page_vins is not None and current_page_vins and current_page_vins == previous_page_vins:
+                print("Pagination did not advance (same vehicles as the previous page) -- stopping.")
+                break
+            previous_page_vins = current_page_vins
+
             for card in cards:
                 car_data = extract_vehicle_data(card, base_url, city=options.city, dealer_name=options.dealer_name)
                 if car_data:

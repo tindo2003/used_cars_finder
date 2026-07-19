@@ -147,6 +147,7 @@ def scrape(base_url, options: ScrapeOptions = None):
 
         # 3. PAGINATION LOOP
         page_count = 0
+        previous_page_vins = None
         while page_count < max_pages:
             page_count += 1
             print(f"--- Scraping Page {page_count} ---")
@@ -162,6 +163,20 @@ def scrape(base_url, options: ScrapeOptions = None):
             soup = BeautifulSoup(html, "html.parser")
 
             vehicles = soup.find_all("div", class_="vehicle-card")
+
+            # A "Next" click can succeed (no exception) without the page
+            # actually changing -- e.g. a site with only one real page of
+            # results but an always-present Next button. If this page has
+            # the exact same vehicles as the previous one, pagination
+            # isn't advancing; stop instead of re-scraping the same cars
+            # up to max_pages times (confirmed live: 12 real vehicles
+            # scraped 20 times over before this guard existed).
+            current_page_vins = frozenset(v.get("data-vin") for v in vehicles if v.get("data-vin"))
+            if previous_page_vins is not None and current_page_vins and current_page_vins == previous_page_vins:
+                print("Pagination did not advance (same vehicles as the previous page) -- stopping.")
+                break
+            previous_page_vins = current_page_vins
+
             for v in vehicles:
                 car_data = extract_vehicle_data(v, base_url, city=options.city, dealer_name=options.dealer_name)
                 if car_data:
