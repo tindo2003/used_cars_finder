@@ -1,95 +1,105 @@
 # MVP Feature Checklist
 
-Checked against [prd.md](./prd.md) (sections referenced in brackets) and the actual codebase as of 2026-07-18. `[x]` = done and verified, `[~]` = partially built, `[ ]` = not started.
+Checked against [prd.md](./prd.md) (sections referenced in brackets) and the actual codebase as of 2026-07-19. `[x]` = done and verified, `[~]` = partially built, `[ ]` = not started.
 
-**Target audience assumption (2026-07-18):** reprioritized for Bay Area buyers specifically hunting for good deals, not general-purpose car shoppers. This shifts what "MVP" means in a few places — see the "Deal-hunter signal" section and the reordered priorities below. Items unaffected by this framing are left as originally scoped.
+**Target audience assumption (2026-07-18):** reprioritized for Bay Area buyers specifically hunting for good deals, not general-purpose car shoppers. This shifts what "MVP" means in a few places. Items unaffected by this framing are left as originally scoped.
+
+**External PRD review (2026-07-19):** independent reviewers gave prioritized feedback on `prd.md`, now incorporated there as a dated addendum plus targeted section edits. Their top-ranked item — defining what a "good deal" actually means — matches this doc's own "Deal-hunter signal" item below and is now the single highest-priority open decision in the project. See `prd.md`'s addendum for the full ranking and per-item detail.
+
+## Highest-priority open decision: what does "good deal" mean?
+
+Flagged independently by this doc (2026-07-18) and by external PRD review (2026-07-19) as the most important gap. The PRD promises "good deals" throughout, but nothing in the product actually evaluates deal quality — search and notifications both only check filter-matching (make/model/price/year/mileage/etc.), never whether a price is actually good relative to comparable listings.
+
+- [ ] **Decide:** ship MVP without any deal signal (current state), or implement a crude version now?
+- [ ] If implemented: a lightweight "$X below comparable listings" signal — same make/model, similar year/mileage range, price vs. the median of that group, computed from data already in the `listings` table. This would change: (a) how `notifications.py` ranks/selects the "top N" listings per digest (currently plain lowest-price, see below), and (b) potentially a "Good Deal" badge on listing cards.
+- [ ] Full Deal Score / Price History / Days on Market remain explicitly out of scope regardless (per PRD section 8, Future Roadmap) — this is only about a minimal signal, not the full roadmap item.
 
 ## Data ingestion (scraper) — mostly done
 
 - [x] Multi-source scraping: Craigslist + 10 dealer sites (DealerOn, DealerInspire) [2.4]
 - [x] Correct dedup/upsert (vin for dealer sources, original_url fallback for VIN-less sources)
 - [x] Data quality fixes: dealeron price parsing, mileage/trim/transmission/fuel_type/city/posted_at/seller_type populated
+- [x] Dealer display name populated (`dealer_name` on `listings`) — see below, "Source: dealerinspire" fixed
 - [x] robots.txt-compliant crawl delays, graceful 403/429 handling
-- [x] Unit tests for the DB layer (`DbClient`, 17 tests)
-- [ ] **Lower priority for this audience:** Cars.com, Autotrader, Facebook Marketplace connectors [1.1] — for a deal hunter, more Bay Area *dealer* coverage in the sources you already have beats a new marketplace *type*. Keep expanding the dealer list (research/bay-area-dealer-candidates.md) ahead of this.
+- [x] Scrape/save orchestration extracted into a testable `ScrapeRunner` class (`scraper/runner.py`), separate from `main.py`'s CLI wiring
+- [x] Unit tests for the DB layer (`DbClient`, 17 tests) and `ScrapeRunner`
+- [ ] **Lower priority for this audience:** Cars.com, Autotrader, Facebook Marketplace connectors [1.1] — more Bay Area *dealer* coverage in existing sources beats a new marketplace *type* for a deal hunter. Keep expanding the dealer list (research/bay-area-dealer-candidates.md) ahead of this.
 - [ ] eBay — dropped due to explicit robots.txt prohibition; would need their official Browse API to reinstate
+- [ ] **Cross-marketplace duplicate detection** (new, external review 2026-07-19) — the same physical vehicle can appear on Craigslist and a dealer site with no shared identifier (Craigslist often lacks VIN). Distinct from the per-source dedup already built. Flagged as an open decision in `prd.md` section 8, not yet built.
 - [ ] Geocoding listings into the `location` PostGIS column (city text is populated, lat/long is not) — needed for radius search [4.2, 5.4]
 - [ ] Unit tests for provider parsing logic (dealeron/dealerinspire/craigslist `extract_*` functions) using fixture HTML
 
-## Notification/matching engine — built 2026-07-18, needs manual setup to go live
+## Notification/matching engine — built and verified live end-to-end
 
 - [x] Evaluate every active listing against every active `saved_searches` row (`scraper/notifications.py`) [3.6, 4.6]
-- [x] Email notifications via Resend
-- [ ] Browser push notifications — not built (email-only for now; sufficient for single-user/personal use)
-- [x] Dedup so the same listing never notifies twice — `notification_history` table with a unique `(saved_search_id, listing_id)` constraint, survives crashes/re-runs [4.6]
-- [x] 17 unit tests (`tests/test_notifications.py`) covering the match logic and orchestration
-- [ ] **Manual setup still needed:** run `migrations/002_add_notification_history.sql` in Supabase, and add `RESEND_API_KEY` to both `scraper/.env` (local) and GitHub Actions secrets (cron)
-
-Known scope choice: matches are re-checked against *every* active listing on every run (not just newly-inserted ones), relying entirely on `notification_history` for dedup rather than insert-vs-update detection. Simpler and crash-safe, at the cost of rechecking existing listings against a newly-created saved search (which will notify for pre-existing matching inventory the first time — arguably more useful for a deal hunter than the PRD's literal "newly indexed listings only" wording).
-
-## Deal-hunter signal — not in the original PRD scope, flagging as a decision
-
-The PRD explicitly places "Deal Score" and "Price History" in **Non-Goals (2.5)** and **Future Roadmap (section 8)** — deliberately deferred past MVP. That's a reasonable call for a general-purpose search tool, but for an audience specifically hunting deals, some version of this is arguably closer to the core value proposition than search polish is. Not resolving this unilaterally — flagging it as a scope decision:
-
-- [ ] **Decide:** ship MVP without any deal signal (per original PRD), or pull forward a crude version?
-- [ ] If pulled forward: a lightweight "$X below similar listings" comparison (same make/model/year-range/mileage-range, computed from data already being collected) — far short of the full "Deal Score" roadmap item, but usable with what's already in the DB
-- [ ] Full Deal Score / Price History / Days on Market remain explicitly out of scope either way (per PRD section 8) — this is only about a minimal version, not building the roadmap item early
+- [x] Batched digest emails via Resend — one email per saved search covering its top N new matches (configurable `--notify-top-n`), not one email per listing
+- [x] Dedup so the same listing never notifies twice — `notification_history` table, unique `(saved_search_id, listing_id)` constraint, survives crashes/re-runs [4.6]
+- [x] Unfiltered ("no criteria set") searches fall back to the N cheapest active listings overall, both in the backend and with a frontend warning before saving such a search
+- [x] Verified live: real Resend emails sent for a real saved search, re-run confirmed as 0 duplicate sends
+- [x] 17+ unit tests (`tests/test_notifications.py`) covering match logic, batching, and the unfiltered-search fallback
+- [ ] Browser push notifications — not built (email-only; sufficient for single-user/personal use so far)
+- [ ] **Handling of updated listings** (new, external review 2026-07-19) — an already-notified listing never re-triggers even on a material price drop afterward. Not yet decided whether/how to address.
+- [ ] **Notification preferences** (new, external review 2026-07-19) — no user-configurable frequency or unsubscribe flow yet.
+- [ ] Worst-case latency is one scrape cycle (~15 min via GitHub Actions cron), not truly real-time — acceptable for personal use, noted as a gap against the PRD's "prioritize speed" wording.
 
 ## Auth — not started
 
 - [ ] Sign up / log in — Supabase auth client scaffolding exists (`utils/supabase/{client,server,middleware}.ts`) but no login/signup UI or session handling is wired up [5.1]
-- [ ] Persistent user identity (needed for Favorites and cross-device Saved Searches — both are blocked on this)
+- [ ] Persistent user identity (needed for Favorites and true cross-device Saved Searches — both still blocked on this, though Saved Searches now has a no-auth stopgap, see below)
 
 ## Search & filters (frontend) — partially built
 
-- [x] Make/model search, max price filter [4.1]
-- [ ] **Higher priority:** Sorting, especially Lowest Price — currently only a fixed `posted_at desc` order, no user control [4.3]. For a deal hunter this (or a price/mileage-adjusted variant) is arguably the more natural default than "Newest Listings."
-- [ ] **Higher priority:** Min model year filter [4.2] and Max mileage filter [4.2] — both are direct value-per-dollar proxies for a deal hunter
+- [x] Make/model search, min year / max mileage / max price as sliders with sensible bounds [4.1, 4.2]
+- [x] Frontend test coverage for search interactions (`app/page.test.tsx`)
+- [ ] Sorting — still only a fixed `posted_at desc` order, no user-selectable sort control [4.3]. For a deal hunter, Lowest Price (or a deal-adjusted variant, pending the decision above) is a stronger candidate default than Newest Listings.
 - [ ] Autocomplete suggestions for make/model [3.3, 4.1]
-- [ ] **Lower priority for this audience:** Transmission filter [4.2] and Seller type filter [4.2] — personal-preference filters, less central to deal-hunting than price/year/mileage
+- [ ] **Lower priority for this audience:** Transmission filter [4.2] and Seller type filter [4.2]
 - [ ] Search radius filter [4.2] — blocked on the geocoding gap above
 
 ## Listings — partially built
 
-- [x] Listing cards: image, price, year/make/model, mileage, source [3.4]
-- [ ] Location and posting time shown on the card (data now exists in the DB, just not rendered)
+- [x] Listing cards: image, price, year/make/model, mileage, dealer name + city (or a friendly marketplace label) instead of the raw platform code [3.4]
+- [ ] Posting time shown on the card (data exists in the DB, not yet rendered)
 - [ ] Dedicated listing detail page: full description, more photos, specs [3.4]
 
-## Saved Searches — partially built
+## Saved Searches — mostly built, no-auth stopgap in place
 
-- [x] Create a saved search (email + filters) [3.5]
-- [ ] List / view existing saved searches [4.5]
-- [ ] Edit / rename [4.5]
-- [ ] Enable / disable [4.5]
-- [ ] Delete [4.5]
-- [ ] Sync across devices — blocked on Auth
+- [x] Create a named saved search (email + filters, including min year / max mileage) [3.5]
+- [x] List saved searches created in this browser (tracked via localStorage IDs, not real auth) [4.5]
+- [x] Delete a saved search [4.5]
+- [ ] Edit / rename an existing saved search [4.5]
+- [ ] Enable / disable toggle [4.5]
+- [ ] True cross-device sync — blocked on Auth; current localStorage approach is a deliberate, documented stopgap (see `migrations/004_relax_saved_searches_rls_for_client_list_delete.sql` for the accepted RLS tradeoff)
 
 ## Favorites — not started (schema-only)
 
 - [x] `favorites` table exists in the DB (`user_id`, `listing_id`, `created_at`)
 - [ ] Add/remove favorite UI [3.7, 4.7]
 - [ ] Favorites page [3.2]
-- Blocked on Auth (needs a real `user_id`) for the PRD's "synced across devices" version
-- [ ] **Possible shortcut for this audience:** a localStorage-based watchlist (no auth required) trades cross-device sync for speed to ship — a deal hunter wants to bookmark/compare candidates *now*, not after a signup flow. Worth considering as a stopgap ahead of full auth rather than blocking Favorites entirely on it.
+- Blocked on Auth (needs a real `user_id`) for the PRD's "synced across devices" version — but the Saved Searches localStorage pattern above is a proven template for a no-auth stopgap here too, if wanted before Auth exists.
+
+## Success Metrics — added 2026-07-19 per external review
+
+New PRD section 9 proposes: notification click-through rate (not instrumented), saved searches per user (computable today), indexing latency (partially approximable), retention via `is_active` over time (computable today, but not per-user without auth). See `prd.md` section 9 for detail — this is a proposed starting point, not a committed measurement plan.
 
 ## MVP Launch Criteria readout [section 7]
 
 | Criterion | Status |
 |---|---|
 | Access from any modern browser | ✅ |
-| Search aggregated listings | 🟡 partial (make/model/price only, 2 sources) |
-| Apply filters | 🟡 partial (3 of 6 PRD filters) |
+| Search aggregated listings | 🟡 partial (make/model/year/mileage/price, 2 source types) |
+| Apply filters | 🟡 partial (5 of 6 PRD filters; radius still blocked) |
 | Browse results | ✅ |
-| Save searches | 🟡 create-only, no management UI |
-| Receive browser/email notifications | ❌ not started |
+| Save searches | 🟡 create + list + delete; no edit/enable-disable yet |
+| Receive browser/email notifications | 🟡 email done and verified live; browser push not built |
 | Open original listing in one click | ✅ |
 
-## Suggested build order (deal-hunter framing)
+## Suggested build order (deal-hunter framing, updated 2026-07-19)
 
-1. **Notification/matching engine** — even more clearly #1 for this audience: speed to see a new underpriced listing is the entire value prop.
-2. **Lowest-price sorting + min-year/max-mileage filters** — cheap to build, directly serves "find good deals" better than the remaining PRD filters do.
-3. **Decide on the deal-hunter signal** (see that section) — resolve this before or alongside #2, since it affects how listings are ranked/displayed.
-4. **Auth** — still needed for real saved-search management and cross-device Favorites; can be partially deferred if the localStorage Favorites shortcut is taken first.
-5. **Saved search management UI + Favorites UI** — straightforward once auth exists (or once the localStorage shortcut is in place for Favorites specifically).
+1. **Decide + implement the "good deal" signal** — now the single highest-priority open item, per both this doc and external review. Affects notification ranking and potentially listing display.
+2. **Sorting control on the frontend** (Lowest Price or deal-adjusted, pending #1) — cheap, high-value for this audience.
+3. **Cross-marketplace duplicate detection** — even a crude heuristic improves perceived quality as more sources get added.
+4. **Auth** — unlocks Favorites, saved-search edit/enable-disable, and true cross-device sync; the Saved Searches localStorage stopgap proves the no-auth pattern works if Auth keeps getting deferred.
+5. **Notification gaps** — updated-listing handling, preferences/unsubscribe, and (optionally) tightening latency below one scrape cycle.
 6. **Remaining filters (transmission, seller type) + listing detail page** — lower priority for this audience than for a general-purpose shopper, but still part of the PRD.
-7. **Additional Bay Area dealer coverage + geocoding for radius search** — expand breadth once the core loop (search → save → notify) works end to end. Additional marketplace *types* (Cars.com, Autotrader, Facebook Marketplace) rank below this for a deal-hunter audience.
+7. **Additional Bay Area dealer coverage + geocoding for radius search** — expand breadth once the core loop is fully tuned. Additional marketplace *types* (Cars.com, Autotrader, Facebook Marketplace) rank below this for a deal-hunter audience.

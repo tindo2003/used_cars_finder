@@ -8,6 +8,18 @@ The sections below have been lightly revised to sharpen the target audience from
 
 Non-Goals (2.5) and Future Roadmap (8) are intentionally left mostly as originally scoped — pulling a minimal deal signal forward into MVP is flagged there as an open decision, not resolved here.
 
+## Addendum: External PRD Review Feedback (2026-07-19)
+
+External reviewers gave prioritized feedback on this PRD. Their ranking, and how it's reflected below:
+
+1. **Define what a "good deal" actually means (their highest priority).** Validates the tension already flagged in Non-Goals (2.5) — now treating it as the top open decision rather than a minor caveat. See 2.5 below.
+2. **Expand notification requirements** (latency, duplicate prevention, updated-listing handling, notification preferences) — latency and duplicate prevention are built and described in 3.6/4.6 below; updated-listing handling and preferences are genuine gaps, called out explicitly there.
+3. **Add MVP success metrics** — new section 9 below. Some proposed metrics need instrumentation that doesn't exist yet, noted inline.
+4. **Reconsider duplicate detection as an MVP feature** (cross-marketplace, not just cross-run dedup) — added as an explicit open decision in 8 below, distinct from the existing per-source dedup already built.
+5. **Acknowledge the complexity of marketplace ingestion** — this project's actual experience strongly confirms this; added to 5.2 below with concrete evidence rather than a generic caveat.
+6. **Add a product differentiation statement** — largely already present in 1.3 ("the intelligence layer above them"); no change made, noted here so it isn't mistaken for an open item.
+7. **Reframe the long-term workflow around monitoring over searching (their lowest priority)** — added as a Future Roadmap note in 8 below; treated as a post-MVP product direction, not an MVP requirement, per the reviewers' own framing.
+
 ## 1. Introduction
 
 ### 1.1 Overview
@@ -59,6 +71,8 @@ The MVP intentionally excludes AI-generated summaries, deal scoring, VIN decodin
 
 Given the refined deal-hunter audience above, deal scoring specifically is worth revisiting for a minimal version rather than a hard exclusion — a crude "$X below similar listings" signal, not the full roadmap item — see the open decision in `research/mvp-checklist.md`. The remaining items stay out of scope for MVP.
 
+**Escalated to highest priority (2026-07-19):** external review independently flagged this same gap: the PRD repeatedly promises "good deals" (1.1, 2.1) but the functional requirements (4.1–4.7) only describe filter-matching, not deal quality. Without some definition, the product is a listing aggregator with alerts, not a deal-hunting tool — a meaningfully different (and less differentiated) product than the one described in 1.3's Vision. **Still an open decision, not resolved here** — but no longer a minor caveat. A concrete starting point, not yet built: flag a listing as a deal when its price falls a threshold percentage below the median price of other active listings with the same make/model and a comparable year/mileage range.
+
 ## 3. User Experience
 
 ### 3.1 User Journey
@@ -106,6 +120,12 @@ Whenever a newly indexed listing satisfies one of a user's saved searches, the a
 The web application supports browser notifications for users who grant permission and email notifications as a fallback.
 
 Notification delivery should prioritize speed over batching.
+
+**Expanded per external review (2026-07-19):**
+- **Latency:** built and running — a GitHub Actions cron scrapes every 15 minutes; matching against saved searches runs at the end of each scrape. Worst-case latency is one scrape interval (~15 min), not truly real-time, which is a real gap against "prioritize speed."
+- **Duplicate prevention:** built — a `notification_history` table with a unique `(saved_search_id, listing_id)` constraint guarantees a given listing never re-notifies the same saved search, and survives crashes/re-runs cleanly.
+- **Handling of updated listings (e.g., a price drop on a listing already notified):** not handled — an already-notified listing never re-triggers even if its price changes materially afterward. Genuine gap, not yet decided whether/how to address for MVP.
+- **Notification preferences (frequency, channels, opt-out):** not built — email only (via Resend), no user-configurable frequency or unsubscribe flow yet. Browser push (also named in this section) remains unbuilt.
 
 ### 3.7 Favorites
 Users may bookmark interesting vehicles while browsing.
@@ -158,6 +178,8 @@ Notifications are generated only for newly indexed listings that satisfy active 
 
 Duplicate notifications should never be sent for the same listing.
 
+Built as a batched digest rather than one email per listing: each run collects every new match per saved search, keeps the cheapest N (configurable), and sends one email covering all of them. See the expanded notes in 3.6 for what's still missing (updated-listing handling, notification preferences).
+
 ### 4.7 Favorites
 Users can add or remove listings from Favorites at any time.
 
@@ -174,6 +196,8 @@ Its responsibilities include rendering the interface, managing user authenticati
 The backend continuously ingests vehicle listings from supported marketplaces, normalizes listing data, stores records in the database, exposes search APIs, evaluates saved searches, and generates notifications.
 
 Business logic remains exclusively on the server.
+
+**Ingestion complexity acknowledgment (added 2026-07-19, per external review):** this PRD originally presented marketplace connectors as a straightforward component. In practice, across the ~10 dealer sites and Craigslist actually connected so far, ingestion has been the most engineering-intensive part of the system: per-platform bot-detection bypasses (DealerInspire sits behind Cloudflare), per-site `robots.txt` crawl-delay compliance, price fields that read from unreliable analytics attributes rather than the real displayed price (found and fixed once already), duplicate-row bugs from mismatched upsert keys, and eBay's `robots.txt` outright prohibiting the access pattern that would be needed (dropped as a source rather than worked around). Each new marketplace or dealer platform realistically needs its own investigation, not just a config entry. See `research/scraping-etiquette.md` and `research/data-quality-findings.md` for the specifics.
 
 ### 5.3 Database
 The primary entities include Users, Listings, Saved Searches, Favorites, and Notification History.
@@ -214,3 +238,18 @@ Future native mobile applications for iOS and Android will reuse the same backen
 Future releases will focus on building an intelligence layer above the search experience. Planned enhancements include Deal Score, Price History, Duplicate Detection, Days on Market, Similar Listings, VIN decoding, Dealer Reputation, interactive map browsing, market analytics, AI-generated listing summaries, image-based condition analysis, ownership cost forecasting, and negotiation assistance.
 
 These features are intentionally deferred until the core search and notification experience has been validated with real users.
+
+**Open decision, added 2026-07-19 per external review — reconsider Duplicate Detection for MVP rather than deferring it fully.** This roadmap item is distinct from the per-source dedup already built (which prevents the same scraper run from creating duplicate rows for one listing). The gap is cross-marketplace: the same physical vehicle can appear on Craigslist and a dealer site with no shared identifier (Craigslist listings frequently lack a VIN), so nothing currently catches that case. Even a crude heuristic (same make/model/year, price and mileage within a tolerance, posted within a few days of each other) would reduce visibly duplicated results in the search UI. Not yet built; flagged as a decision, not resolved here.
+
+**Future direction, added 2026-07-19 per external review — monitoring over searching.** The audience refinement (see the earlier addendum) implies users will spend more time waiting for alerts than repeatedly searching. Over time this may justify making Saved Searches/notifications the primary experience, with ad hoc search as the secondary path, rather than the reverse. This is a post-MVP product direction per the reviewers' own framing, not a requirement for this MVP — the current search-first workflow remains sufficient to validate the core hypothesis.
+
+## 9. Success Metrics
+
+Added 2026-07-19 per external review — this PRD previously defined what would be built but not how to judge whether it worked. Proposed metrics for evaluating the core hypothesis (1.1: "buyers are willing to rely on a dedicated search platform if it consistently surfaces good-value vehicles faster than manually searching multiple websites"):
+
+- **Notification click-through rate** — share of sent notification emails that result in a click through to a listing. *Not yet instrumented* — would need link tracking on the "View listing" URLs in the email, which don't currently record clicks.
+- **Saved searches per user** — average number of active saved searches per email address. Computable today directly from the `saved_searches` table.
+- **Indexing latency** — time between a listing appearing on the source site and it appearing in the `listings` table. Approximable today from `listings.posted_at` vs `listings.created_at` where the source provides a real posting date; not tracked as a dedicated metric yet.
+- **Retention** — whether users with active saved searches keep them active (vs. disabling/deleting) over time. Computable today from `saved_searches.is_active` and `created_at`, though with no auth there's no way to distinguish a returning user from a new one across sessions.
+
+These are proposed starting points, not a committed measurement plan — several need instrumentation that doesn't exist yet, noted inline above.
