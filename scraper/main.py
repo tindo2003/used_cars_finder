@@ -4,6 +4,7 @@ from typing import Optional
 
 from providers import craigslist, dealeron, dealerinspire
 from db import get_supabase, DbClient
+from models import SavedSearch
 from runner import ScrapeRunner
 
 DEALERS = [
@@ -57,10 +58,16 @@ def run_scraper(dry_run: bool = False, max_pages: Optional[int] = None, log_inte
         response = (
             supabase.table("saved_searches").select("*").eq("is_active", True).execute()
         )
-        searches = response.data
+        # Validated here (not left as raw dicts) so a saved_searches
+        # schema change is caught by mypy at every runner.py call site,
+        # not just the ones a human remembers to update -- a bare-dict
+        # search once broke run_marketplace_searches in production when
+        # migration 014 changed make/model from scalar to list.
+        searches = [SavedSearch.model_validate(row) for row in response.data]
     else:
-        # Dummy data for dry run testing
-        searches = [{"make": "Toyota", "model": "Camry", "max_price": 20000}]
+        # Dummy data for dry run testing -- kept in the *current* real
+        # schema shape (make/model as lists) for the same reason.
+        searches = [SavedSearch(make=["Toyota"], model=["Camry"], max_price=20000)]
 
     runner = ScrapeRunner(db_client, DEALERS, DEALER_SCRAPERS, ACTIVE_MARKETPLACES)
     runner.run(searches, dry_run, progress, log_interval_seconds, max_pages)

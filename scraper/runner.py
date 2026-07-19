@@ -2,6 +2,7 @@ import random
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+from models import SavedSearch
 from options import ScrapeOptions
 
 
@@ -30,14 +31,14 @@ class ScrapeRunner:
 
     def run_marketplace_searches(
         self,
-        searches: List[Dict[str, Any]],
+        searches: List[SavedSearch],
         dry_run: bool,
         progress: Dict[str, Any],
         log_interval_seconds: float,
     ) -> None:
         for search in searches:
-            makes = search.get("make") or []
-            models = search.get("model") or []
+            makes = search.make or []
+            models = search.model or []
 
             if not makes and not models:
                 continue
@@ -49,11 +50,13 @@ class ScrapeRunner:
             # semantics the search filter and notification matching use).
             # `[None]` stands in for an unset dimension so e.g. "any
             # Camry" (no make filter) still runs once, not zero times.
-            for make in makes or [None]:
-                for model in models or [None]:
+            make_options: List[Optional[str]] = list(makes) if makes else [None]
+            model_options: List[Optional[str]] = list(models) if models else [None]
+            for make in make_options:
+                for model in model_options:
                     print(f"\nEvaluating target: {(make or '').capitalize()} {(model or '').capitalize()}")
 
-                    options = ScrapeOptions(make=make, model=model, max_price=search.get("max_price"))
+                    options = ScrapeOptions(make=make, model=model, max_price=search.max_price)
                     for provider_func in self.active_marketplaces:
                         cars_found = provider_func(options)
                         self.db_client.bulk_save(cars_found, dry_run, progress, log_interval_seconds)
@@ -86,7 +89,7 @@ class ScrapeRunner:
 
     def run(
         self,
-        searches: List[Dict[str, Any]],
+        searches: List[SavedSearch],
         dry_run: bool,
         progress: Dict[str, Any],
         log_interval_seconds: float,

@@ -6,11 +6,20 @@ transmission; DealerInspire doesn't expose mileage/transmission at all
 -- see providers/dealerinspire.py), so every field is optional rather
 than requiring a shape no single source actually produces.
 
-Deliberately NOT used by providers/*.py or runner.py -- those keep
-returning/passing plain dicts exactly as before. Validation happens at
-the DB boundary (db.py's bulk_save/upsert and read_listings), which is
-the earliest point *shared* by every source, without touching each
-scraper individually. See research/mvp-checklist.md for the reasoning.
+Deliberately NOT used by providers/*.py -- those keep returning/passing
+plain scraped-listing dicts exactly as before. Validation happens at the
+DB boundary (db.py's bulk_save/upsert and read_listings), which is the
+earliest point *shared* by every source, without touching each scraper
+individually. See research/mvp-checklist.md for the reasoning.
+
+SavedSearch IS validated before runner.py sees it too (main.py does this
+at fetch time), unlike the original scoping here -- a schema change
+(migration 014, scalar make/model -> list) once broke runner.py in
+production (AttributeError: 'list' object has no attribute 'capitalize')
+because runner.py read saved_searches as plain untyped dicts, so mypy
+had nothing real to check against. Routing every SavedSearch consumer
+through this model means the next schema change gets caught by mypy at
+every call site, not just the ones a human remembers to update by hand.
 """
 
 from datetime import datetime

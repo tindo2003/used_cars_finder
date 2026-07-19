@@ -1,5 +1,12 @@
+from models import SavedSearch
 from options import ScrapeOptions
 from runner import ScrapeRunner
+
+
+def make_search(**overrides):
+    search = {"make": None, "model": None, "max_price": None}
+    search.update(overrides)
+    return SavedSearch.model_validate(search)
 
 
 class FakeDbClient:
@@ -37,7 +44,7 @@ def test_run_marketplace_searches_calls_provider_with_search_filters():
         return [{"make": "Toyota", "model": "Camry"}]
 
     runner, db_client = make_runner(active_marketplaces=[fake_provider])
-    searches = [{"make": ["Toyota"], "model": ["Camry"], "max_price": 20000}]
+    searches = [make_search(make=["Toyota"], model=["Camry"], max_price=20000)]
 
     runner.run_marketplace_searches(searches, dry_run=False, progress=make_progress(), log_interval_seconds=60)
 
@@ -54,7 +61,7 @@ def test_run_marketplace_searches_skips_searches_with_no_make_or_model():
         return []
 
     runner, db_client = make_runner(active_marketplaces=[fake_provider])
-    searches = [{"make": None, "model": None, "max_price": 20000}]
+    searches = [make_search(max_price=20000)]
 
     runner.run_marketplace_searches(searches, dry_run=False, progress=make_progress(), log_interval_seconds=60)
 
@@ -74,7 +81,7 @@ def test_run_marketplace_searches_calls_every_active_marketplace():
         return []
 
     runner, db_client = make_runner(active_marketplaces=[provider_a, provider_b])
-    searches = [{"make": ["Honda"], "model": ["Civic"]}]
+    searches = [make_search(make=["Honda"], model=["Civic"])]
 
     runner.run_marketplace_searches(searches, dry_run=False, progress=make_progress(), log_interval_seconds=60)
 
@@ -92,7 +99,7 @@ def test_run_marketplace_searches_covers_every_make_and_model_combination():
         return []
 
     runner, _ = make_runner(active_marketplaces=[fake_provider])
-    searches = [{"make": ["Toyota", "Lexus"], "model": ["Camry", "ES"]}]
+    searches = [make_search(make=["Toyota", "Lexus"], model=["Camry", "ES"])]
 
     runner.run_marketplace_searches(searches, dry_run=False, progress=make_progress(), log_interval_seconds=60)
 
@@ -112,7 +119,7 @@ def test_run_marketplace_searches_handles_multiple_makes_with_no_model_filter():
         return []
 
     runner, _ = make_runner(active_marketplaces=[fake_provider])
-    searches = [{"make": ["Toyota", "Lexus"], "model": None}]
+    searches = [make_search(make=["Toyota", "Lexus"])]
 
     runner.run_marketplace_searches(searches, dry_run=False, progress=make_progress(), log_interval_seconds=60)
 
@@ -185,7 +192,7 @@ def test_run_executes_marketplace_searches_then_dealer_scrapes():
         dealer_scrapers={"dealeron": fake_dealer_scrape},
         active_marketplaces=[fake_provider],
     )
-    searches = [{"make": ["Honda"], "model": ["Civic"]}]
+    searches = [make_search(make=["Honda"], model=["Civic"])]
 
     runner.run(searches, dry_run=False, progress=make_progress(), log_interval_seconds=60)
 
