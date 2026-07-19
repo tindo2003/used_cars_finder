@@ -55,8 +55,8 @@ class SavedSearch(BaseModel):
     name: Optional[str] = None
     email: Optional[str] = None
     is_active: Optional[bool] = None
-    make: Optional[str] = None
-    model: Optional[str] = None
+    make: Optional[List[str]] = None
+    model: Optional[List[str]] = None
     min_year: Optional[int] = None
     max_mileage: Optional[int] = None
     max_price: Optional[float] = None
@@ -64,4 +64,5 @@ class SavedSearch(BaseModel):
     seller_type: Optional[str] = None
     search_radius_miles: Optional[float] = None
     target_location: Optional[str] = None
+    notification_grouping: Optional[str] = "combined"
     created_at: Optional[datetime] = None

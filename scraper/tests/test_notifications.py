@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from models import Listing, SavedSearch
-from notifications import DEFAULT_TOP_N, _format_listing_html, _seller_label, matches, notify_matches
+from notifications import DEFAULT_TOP_N, _format_listing_html, _search_label, _seller_label, matches, notify_matches
 from tests.fakes import FakeSupabase
 
 
@@ -60,15 +60,30 @@ def test_matches_with_no_filters_set_always_passes():
 
 
 def test_matches_rejects_wrong_make():
-    assert matches(make_listing(make="Honda"), make_search(make="Toyota")) is False
+    assert matches(make_listing(make="Honda"), make_search(make=["Toyota"])) is False
 
 
 def test_matches_accepts_case_insensitive_make():
-    assert matches(make_listing(make="toyota"), make_search(make="TOYOTA")) is True
+    assert matches(make_listing(make="toyota"), make_search(make=["TOYOTA"])) is True
 
 
-def test_matches_model_is_a_substring_match():
-    assert matches(make_listing(model="Corolla Hatchback"), make_search(model="corolla")) is True
+def test_matches_model_requires_an_exact_value_match():
+    # Multi-select now offers exact distinct values from listings, not
+    # free-typed fragments, so model matching is exact, not substring.
+    assert matches(make_listing(model="Corolla Hatchback"), make_search(model=["Corolla"])) is False
+    assert matches(make_listing(model="Corolla"), make_search(model=["Corolla"])) is True
+
+
+def test_matches_accepts_any_of_multiple_makes():
+    assert matches(make_listing(make="Lexus"), make_search(make=["Toyota", "Lexus"])) is True
+
+
+def test_matches_rejects_when_make_not_in_the_list():
+    assert matches(make_listing(make="Honda"), make_search(make=["Toyota", "Lexus"])) is False
+
+
+def test_matches_accepts_any_of_multiple_models():
+    assert matches(make_listing(model="ES"), make_search(model=["Camry", "ES"])) is True
 
 
 def test_matches_rejects_price_above_max():
@@ -124,6 +139,21 @@ def test_seller_label_falls_back_to_the_raw_marketplace_source_if_unrecognized()
     assert _seller_label(listing) == "some_new_platform"
 
 
+# --- _search_label() ---
+
+
+def test_search_label_prefers_the_search_name_when_set():
+    assert _search_label(make_search(name="Lexus ES watch", make=["Lexus"])) == "'Lexus ES watch'"
+
+
+def test_search_label_falls_back_to_make_and_model_when_unnamed():
+    assert _search_label(make_search(make=["Toyota", "Lexus"], model=["Camry"])) == "Toyota/Lexus Camry"
+
+
+def test_search_label_is_none_for_a_fully_unfiltered_unnamed_search():
+    assert _search_label(make_search()) is None
+
+
 # --- _format_listing_html() ---
 
 
@@ -174,6 +204,20 @@ def test_notify_matches_sends_one_digest_email_and_records_history():
     assert history[0]["listing_id"] == "listing-1"
 
 
+def test_notify_matches_passes_the_search_label_through_to_send_email_fn():
+    supabase = FakeSupabase(
+        initial_data={
+            "saved_searches": [make_search_row(name="Lexus watch", make=["Lexus"])],
+            "listings": [make_listing_row(make="Lexus")],
+        }
+    )
+    labels = []
+
+    notify_matches(supabase, send_email_fn=lambda email, listings, **kwargs: labels.append(kwargs.get("search_label")))
+
+    assert labels == ["'Lexus watch'"]
+
+
 def test_notify_matches_resends_a_listing_already_in_notification_history():
     # A deal-hunter wants today's best matches, not just novel ones -- a
     # search whose top result hasn't changed should still get emailed.
@@ -195,7 +239,7 @@ def test_notify_matches_resends_a_listing_already_in_notification_history():
 def test_notify_matches_skips_non_matching_listings():
     supabase = FakeSupabase(
         initial_data={
-            "saved_searches": [make_search_row(make="Honda")],
+            "saved_searches": [make_search_row(make=["Honda"])],
             "listings": [make_listing_row(make="Toyota")],
         }
     )
@@ -358,3 +402,98 @@ def test_notify_matches_sends_the_same_top_n_again_on_a_second_run():
     # notification_history logs both sends -- 3 rows per run, not deduped.
     history = supabase.table("notification_history").data
     assert len(history) == 6
+
+
+# --- notify_matches(): notification_grouping ---
+
+
+def test_notify_matches_combined_grouping_sends_one_email_by_default():
+    supabase = FakeSupabase(
+        initial_data={
+            "saved_searches": [make_search_row(make=["Toyota", "Lexus"])],
+            "listings": [
+                make_listing_row(id="listing-toyota", make="Toyota"),
+                make_listing_row(id="listing-lexus", make="Lexus"),
+            ],
+        }
+    )
+    digests = []
+
+    count = notify_matches(supabase, send_email_fn=lambda email, listings, **kwargs: digests.append(listings))
+
+    assert count == 1
+    assert {listing.id for listing in digests[0]} == {"listing-toyota", "listing-lexus"}
+
+
+def test_notify_matches_groups_by_make_sends_one_email_per_make():
+    supabase = FakeSupabase(
+        initial_data={
+            "saved_searches": [make_search_row(make=["Toyota", "Lexus"], notification_grouping="make")],
+            "listings": [
+                make_listing_row(id="listing-toyota-1", make="Toyota"),
+                make_listing_row(id="listing-toyota-2", make="Toyota"),
+                make_listing_row(id="listing-lexus", make="Lexus"),
+            ],
+        }
+    )
+    digests = []
+
+    count = notify_matches(
+        supabase,
+        send_email_fn=lambda email, listings, group_label=None, **kwargs: digests.append(
+            (group_label, {l.id for l in listings})
+        ),
+    )
+
+    assert count == 2
+    assert (("Toyota", {"listing-toyota-1", "listing-toyota-2"}) in digests)
+    assert (("Lexus", {"listing-lexus"}) in digests)
+
+
+def test_notify_matches_groups_by_model_sends_one_email_per_model():
+    supabase = FakeSupabase(
+        initial_data={
+            "saved_searches": [make_search_row(model=["Camry", "ES"], notification_grouping="model")],
+            "listings": [
+                make_listing_row(id="listing-camry", model="Camry"),
+                make_listing_row(id="listing-es", model="ES"),
+            ],
+        }
+    )
+    digests = []
+
+    count = notify_matches(
+        supabase,
+        send_email_fn=lambda email, listings, group_label=None, **kwargs: digests.append(
+            (group_label, {l.id for l in listings})
+        ),
+    )
+
+    assert count == 2
+    assert (("Camry", {"listing-camry"}) in digests)
+    assert (("ES", {"listing-es"}) in digests)
+
+
+def test_notify_matches_groups_cap_top_n_independently_per_group():
+    # top_n applies per group, not split across groups -- a search
+    # watching 2 makes with top_n=2 can send up to 2 listings for EACH
+    # make, not 2 total.
+    listings = [make_listing_row(id=f"toyota-{i}", make="Toyota", price=10000 + i) for i in range(3)] + [
+        make_listing_row(id=f"lexus-{i}", make="Lexus", price=20000 + i) for i in range(3)
+    ]
+    supabase = FakeSupabase(
+        initial_data={
+            "saved_searches": [make_search_row(make=["Toyota", "Lexus"], notification_grouping="make")],
+            "listings": listings,
+        }
+    )
+    digests = []
+
+    notify_matches(
+        supabase,
+        send_email_fn=lambda email, listings, group_label=None, **kwargs: digests.append((group_label, listings)),
+        top_n=2,
+    )
+
+    sizes = {label: len(group_listings) for label, group_listings in digests}
+    assert sizes == {"Toyota": 2, "Lexus": 2}
