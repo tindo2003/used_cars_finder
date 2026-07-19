@@ -303,6 +303,32 @@ describe("listing display", () => {
 
         expect(screen.queryByText(/Good Deal/)).not.toBeInTheDocument();
     });
+
+    it("shows how long ago the listing was last confirmed by the scraper", async () => {
+        const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+        setFakeSupabase(
+            makeFakeSupabase({
+                listingsResult: { data: [makeListing({ last_seen_at: twoHoursAgo })], error: null },
+            })
+        );
+
+        render(<Home />);
+
+        expect(await screen.findByText("Updated 2 hours ago")).toBeInTheDocument();
+    });
+
+    it("shows nothing for last-updated when last_seen_at is missing", async () => {
+        setFakeSupabase(
+            makeFakeSupabase({
+                listingsResult: { data: [makeListing({ last_seen_at: null })], error: null },
+            })
+        );
+
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        expect(screen.queryByText(/Updated/)).not.toBeInTheDocument();
+    });
 });
 
 describe("sorting", () => {

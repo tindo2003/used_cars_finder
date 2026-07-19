@@ -27,6 +27,26 @@ function getSellerLabel(car: any) {
     return MARKETPLACE_LABELS[car.marketplace_source] ?? car.marketplace_source;
 }
 
+// last_seen_at is stamped by the scraper every time it re-confirms a
+// listing is still up (see scraper/db.py) -- surfacing it as "Updated
+// X ago" tells the customer how fresh/likely-still-available a listing
+// is, without needing to explain the underlying mechanism.
+function formatLastSeen(lastSeenAt: unknown): string | null {
+    if (typeof lastSeenAt !== "string") return null;
+    const seenDate = new Date(lastSeenAt);
+    if (Number.isNaN(seenDate.getTime())) return null;
+
+    const diffMinutes = Math.round((Date.now() - seenDate.getTime()) / 60000);
+    if (diffMinutes < 1) return "Updated just now";
+    if (diffMinutes < 60) return `Updated ${diffMinutes} minute${diffMinutes === 1 ? "" : "s"} ago`;
+
+    const diffHours = Math.round(diffMinutes / 60);
+    if (diffHours < 24) return `Updated ${diffHours} hour${diffHours === 1 ? "" : "s"} ago`;
+
+    const diffDays = Math.round(diffHours / 24);
+    return `Updated ${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
+}
+
 // deal_score/is_good_deal are computed server-side (scraper/deals.py,
 // refreshed daily) and stored on the row -- the heuristic lives in one
 // place (Python), the frontend just sorts/displays the stored value.
@@ -358,6 +378,11 @@ export default function Home() {
                                         {getSellerLabel(car)}
                                     </span>
                                 </p>
+                                {formatLastSeen(car.last_seen_at) && (
+                                    <p className="text-xs text-slate-400">
+                                        {formatLastSeen(car.last_seen_at)}
+                                    </p>
+                                )}
                             </div>
 
                             <a
