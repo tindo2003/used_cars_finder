@@ -72,6 +72,34 @@ def test_ignores_listings_of_a_different_make_or_model():
     assert score == 0.2  # unaffected by the unrelated listings
 
 
+def test_excludes_comparables_of_a_different_seller_type():
+    # A dealer listing shouldn't get its median pulled down by cheaper
+    # private-party (Craigslist) listings of the same make/model, and
+    # vice versa -- see the "no private-party vs. dealer distinction"
+    # limitation this fixes.
+    listing = make_listing(price=8000, seller_type="dealer")
+    dealer_comparables = make_comparables([10000, 10000, 10000], seller_type="dealer")
+    cheap_private_party = [
+        make_listing(id=f"private-{i}", price=1000, seller_type=None) for i in range(3)
+    ]
+
+    score = compute_deal_score(listing, [listing] + dealer_comparables + cheap_private_party)
+
+    assert score == 0.2  # unaffected by the cheaper private-party listings
+
+
+def test_craigslist_listings_still_compare_against_each_other():
+    # Craigslist never sets seller_type (stays None) -- None == None
+    # must still match so private-party listings keep comparing against
+    # their own channel, not just against dealers.
+    listing = make_listing(price=8000, seller_type=None)
+    craigslist_comparables = make_comparables([10000, 10000, 10000], seller_type=None)
+
+    score = compute_deal_score(listing, [listing] + craigslist_comparables)
+
+    assert score == 0.2
+
+
 def test_excludes_listings_outside_the_year_window():
     listing = make_listing(price=8000, model_year=2020)
     # DEAL_YEAR_WINDOW is 2, so 2023 (3 years away) shouldn't count

@@ -23,6 +23,19 @@ def _is_comparable(listing: Listing, other: Listing) -> bool:
         return False
     if (other.model or "").lower() != (listing.model or "").lower():
         return False
+    # Craigslist listings (seller_type unset, i.e. None) are
+    # overwhelmingly private-party and price meaningfully lower than a
+    # dealer's listing of a comparable car (no reconditioning cost, no
+    # dealer markup, no warranty backed into the price). Mixing the two
+    # channels into one median made either channel look artificially
+    # like a "deal" relative to the other, most visibly with old, cheap
+    # Craigslist listings dominating a make's top-ranked matches purely
+    # from being systematically cheaper by channel (user-flagged
+    # 2026-07-20, with production evidence). None == None keeps
+    # Craigslist-vs-Craigslist comparisons intact -- only cross-channel
+    # (dealer vs. private-party) pairs are excluded.
+    if (other.seller_type or "").lower() != (listing.seller_type or "").lower():
+        return False
 
     year = listing.model_year
     other_year = other.model_year
