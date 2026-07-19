@@ -22,7 +22,7 @@ Was flagged independently by this doc (2026-07-18) and by external PRD review (2
 
 ## Data ingestion (scraper) — mostly done
 
-- [x] Multi-source scraping: Craigslist + 10 dealer sites (DealerOn, DealerInspire) [2.4]
+- [x] Multi-source scraping: Craigslist + 11 dealer sites (DealerOn, DealerInspire) [2.4]
 - [x] Correct dedup/upsert (vin for dealer sources, original_url fallback for VIN-less sources)
 - [x] Data quality fixes: dealeron price parsing, mileage/trim/transmission/fuel_type/city/posted_at/seller_type populated
 - [x] Dealer display name populated (`dealer_name` on `listings`) — see below, "Source: dealerinspire" fixed
@@ -45,6 +45,7 @@ Was flagged independently by this doc (2026-07-18) and by external PRD review (2
 - [x] Verified live: real Resend emails sent for a real saved search, re-run confirmed as 0 duplicate sends
 - [x] 17+ unit tests (`tests/test_notifications.py`) covering match logic, batching, and the unfiltered-search fallback
 - [x] Notification checking split into its own workflow (`.github/workflows/notify.yml`, `scraper/notify.py`), separate from scraping — lighter (no Playwright), and not delayed by slow scrape runs
+- [x] **Stale-listing expiry + recency tiebreak** — built 2026-07-20. `scraper/db.py`'s upsert now stamps `last_seen_at` on every insert/update; `scraper/staleness.py`'s `expire_stale_listings()` (run first in `notify.py`, before dup/deal-score/notify steps) marks `status="expired"` on any active listing not reconfirmed within a configurable window (`--stale-threshold-days`, default 90 days), which then falls out of every downstream read for free since they all already filter on `status="active"`. Working assumption: a listing the scraper keeps re-seeing is more likely still available than one it hasn't re-seen in months. `deals.ranking_key` (used by notification ranking) and the frontend's listings query both use `last_seen_at` as a tiebreaker only (most-recently-seen first), never the primary sort. **Caveat, documented in `staleness.py`'s docstring:** this is a much stronger signal for dealer listings (full-inventory re-scrape every run) than Craigslist (only re-searched for make/models with a currently active saved search — a Craigslist listing can go stale just because no one's searching for it anymore, not because it sold). Needs migration 009 (`last_seen_at` column) run in Supabase. 22 new tests across `tests/test_timestamps.py`, `tests/test_staleness.py`, `tests/test_deals.py`, `tests/test_db.py`.
 - [ ] Browser push notifications — not built (email-only; sufficient for single-user/personal use so far)
 - [ ] **Handling of updated listings** (new, external review 2026-07-19) — an already-notified listing never re-triggers even on a material price drop afterward. Not yet decided whether/how to address.
 - [ ] **Notification preferences** (new, external review 2026-07-19) — no user-configurable frequency or unsubscribe flow yet.

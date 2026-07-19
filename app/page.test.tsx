@@ -273,6 +273,11 @@ describe("sorting", () => {
             ascending: false,
             nullsFirst: false,
         });
+        // last_seen_at is always the tiebreaker, regardless of primary sort.
+        expect(fake.listingsQuery.order).toHaveBeenCalledWith("last_seen_at", {
+            ascending: false,
+            nullsFirst: false,
+        });
         expect(screen.getByRole("combobox", { name: "Sort by" })).toHaveValue("best_deal");
     });
 

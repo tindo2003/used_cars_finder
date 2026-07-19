@@ -1,4 +1,4 @@
-from pagination import page_did_not_advance
+from utils.pagination import page_did_not_advance
 
 
 def test_first_page_never_counts_as_a_stall():

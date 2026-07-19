@@ -112,12 +112,18 @@ export default function Home() {
         try {
             const sortOption = SORT_OPTIONS.find((option) => option.value === sortBy) ?? SORT_OPTIONS[0];
 
+            // last_seen_at is a tiebreaker only, not a sort option of its
+            // own: when the primary sort has ties (e.g. two listings at
+            // the same price), the one the scraper most recently
+            // reconfirmed is more likely still available (see
+            // scraper/staleness.py) and is preferred.
             let query = supabase
                 .from("listings")
                 .select("*")
                 .eq("status", "active")
                 .is("duplicate_of", null)
-                .order(sortOption.column, { ascending: sortOption.ascending, nullsFirst: false });
+                .order(sortOption.column, { ascending: sortOption.ascending, nullsFirst: false })
+                .order("last_seen_at", { ascending: false, nullsFirst: false });
 
             if (make.trim()) query = query.ilike("make", `%${make.trim()}%`);
             if (model.trim()) query = query.ilike("model", `%${model.trim()}%`);
@@ -571,7 +577,18 @@ export default function Home() {
 
                 {/* Results Grid */}
                 <section>
-                    <div className="flex justify-end mb-4">
+                    <div className="flex justify-end items-center gap-2 mb-4">
+                        <span className="group relative inline-flex">
+                            <span
+                                aria-label="What counts as Best Deal?"
+                                className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-200 text-slate-600 text-xs font-bold cursor-help"
+                            >
+                                i
+                            </span>
+                            <span className="pointer-events-none absolute right-0 top-full mt-1.5 w-64 max-w-[calc(100vw-2rem)] rounded-md bg-slate-900 px-2.5 py-2 text-xs font-normal leading-snug text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 z-20">
+                                Best Deal ranks listings 12%+ below the median price of similar active listings (same make/model, within 2 model years and 20,000 miles).
+                            </span>
+                        </span>
                         <label htmlFor="sortBy" className="sr-only">
                             Sort by
                         </label>

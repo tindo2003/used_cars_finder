@@ -4,7 +4,7 @@ import base64
 import random
 
 from options import ScrapeOptions
-from pagination import page_did_not_advance
+from utils.pagination import page_did_not_advance
 
 
 def extract_price(v):

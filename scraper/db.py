@@ -1,5 +1,6 @@
 import os
 import time
+from datetime import datetime, timezone
 
 from supabase import create_client
 
@@ -75,9 +76,12 @@ class DbClient:
         """
         Insert or update a listing, deduping on (vin, dealer_name)
         (dealer sources) or original_url (VIN-less sources like
-        Craigslist) — see get_conflict_key().
+        Craigslist) — see get_conflict_key(). Stamps last_seen_at with
+        the current time on every call (insert or update) -- this is
+        what staleness.expire_stale_listings and deals.ranking_key's
+        recency tiebreak both key off of.
         """
-        car = dict(car, status="active")
+        car = dict(car, status="active", last_seen_at=datetime.now(timezone.utc).isoformat())
         conflict_key = get_conflict_key(car)
         return self._table().upsert(car, on_conflict=conflict_key).execute()
 

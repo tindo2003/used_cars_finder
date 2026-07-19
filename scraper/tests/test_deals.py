@@ -184,6 +184,41 @@ def test_ranking_key_prefers_scored_deals_over_unscored_cheaper_listings():
     assert [listing["id"] for listing in ordered] == ["scored", "unscored"]
 
 
+def test_ranking_key_breaks_a_score_tie_by_more_recently_seen_first():
+    seen_recently = make_listing(id="recent", price=8000, last_seen_at="2026-07-20T00:00:00Z")
+    seen_a_while_ago = make_listing(id="stale", price=8000, last_seen_at="2026-01-01T00:00:00Z")
+    comparables = make_comparables([10000, 10000, 10000])  # both score identically at 20% off
+
+    pool = [seen_recently, seen_a_while_ago] + comparables
+    ordered = sorted([seen_a_while_ago, seen_recently], key=lambda listing: ranking_key(listing, pool))
+
+    assert [listing["id"] for listing in ordered] == ["recent", "stale"]
+
+
+def test_ranking_key_breaks_a_price_tie_by_more_recently_seen_first():
+    seen_recently = make_listing(id="recent", make="Rare", price=5000, last_seen_at="2026-07-20T00:00:00Z")
+    seen_a_while_ago = make_listing(id="stale", make="Rare", price=5000, last_seen_at="2026-01-01T00:00:00Z")
+    # no comparables for "Rare" -- both fall back to the price tier, which ties
+
+    ordered = sorted(
+        [seen_a_while_ago, seen_recently],
+        key=lambda listing: ranking_key(listing, [seen_recently, seen_a_while_ago]),
+    )
+
+    assert [listing["id"] for listing in ordered] == ["recent", "stale"]
+
+
+def test_ranking_key_treats_missing_last_seen_at_as_least_recent():
+    seen_recently = make_listing(id="recent", price=8000, last_seen_at="2026-07-20T00:00:00Z")
+    never_recorded = make_listing(id="unknown", price=8000, last_seen_at=None)
+    comparables = make_comparables([10000, 10000, 10000])
+
+    pool = [seen_recently, never_recorded] + comparables
+    ordered = sorted([never_recorded, seen_recently], key=lambda listing: ranking_key(listing, pool))
+
+    assert [listing["id"] for listing in ordered] == ["recent", "unknown"]
+
+
 # --- update_deal_scores() ---
 
 

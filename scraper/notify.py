@@ -4,6 +4,7 @@ from db import get_supabase
 from deals import update_deal_scores
 from duplicates import update_duplicate_flags
 from notifications import DEFAULT_TOP_N, notify_matches
+from staleness import DEFAULT_STALE_THRESHOLD_DAYS, expire_stale_listings
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -15,10 +16,25 @@ if __name__ == "__main__":
         default=DEFAULT_TOP_N,
         help=f"Max listings included per notification digest email (default: {DEFAULT_TOP_N})",
     )
+    parser.add_argument(
+        "--stale-threshold-days",
+        type=int,
+        default=DEFAULT_STALE_THRESHOLD_DAYS,
+        help=(
+            "Listings not reconfirmed by the scraper in this many days are "
+            f"marked expired and excluded everywhere (default: {DEFAULT_STALE_THRESHOLD_DAYS})"
+        ),
+    )
     args = parser.parse_args()
 
     supabase = get_supabase()
     print("Connected to Supabase.")
+
+    # Runs first so every step below (duplicate flags, deal scores,
+    # notification matching) only ever sees non-expired listings, since
+    # they all already filter on status="active".
+    expired = expire_stale_listings(supabase, stale_threshold_days=args.stale_threshold_days)
+    print(f"Expired {expired} listings not reconfirmed in over {args.stale_threshold_days} days.")
 
     duplicates = update_duplicate_flags(supabase)
     print(f"Updated duplicate flags; {duplicates} listings flagged as cross-marketplace duplicates.")

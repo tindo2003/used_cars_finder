@@ -1,4 +1,5 @@
 import time
+from datetime import datetime
 
 import pytest
 
@@ -103,6 +104,18 @@ def test_upsert_uses_vin_and_dealer_name_as_conflict_key_when_present():
     assert call["payload"]["status"] == "active"
 
 
+def test_upsert_stamps_last_seen_at():
+    supabase = FakeSupabase()
+    db = DbClient(supabase)
+    before = time.time()
+
+    db.upsert({"original_url": "https://example.com/a"})
+
+    payload = supabase.table("listings").calls[0]["payload"]
+    stamped = datetime.fromisoformat(payload["last_seen_at"])
+    assert before <= stamped.timestamp() <= time.time()
+
+
 def test_upsert_falls_back_to_original_url_when_vin_missing():
     supabase = FakeSupabase()
     db = DbClient(supabase)
@@ -120,6 +133,7 @@ def test_upsert_does_not_mutate_the_caller_dict():
     db.upsert(car)
 
     assert "status" not in car
+    assert "last_seen_at" not in car
 
 
 def test_upsert_updates_in_place_on_conflict():

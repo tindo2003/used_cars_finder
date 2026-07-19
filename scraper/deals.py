@@ -6,6 +6,7 @@ section 2.5 for the product context this responds to).
 """
 
 from db import DbClient
+from utils.timestamps import parse_timestamp
 
 DEAL_YEAR_WINDOW = 2
 DEAL_MILEAGE_WINDOW = 20000
@@ -77,19 +78,33 @@ def is_good_deal(listing, all_listings):
     return score is not None and score >= DEAL_THRESHOLD
 
 
+def _recency_tiebreak(listing):
+    """
+    Sorts more-recently-reconfirmed listings first (see
+    staleness.expire_stale_listings for why "seen more recently" is a
+    proxy for "more likely still available"). Only meant to break ties
+    on score/price -- listings with no last_seen_at sort last within
+    their tie group rather than winning by default.
+    """
+    last_seen = parse_timestamp(listing.get("last_seen_at"))
+    return -last_seen.timestamp() if last_seen is not None else float("inf")
+
+
 def ranking_key(listing, all_listings):
     """
     Sort key that ranks listings with a computable deal score by that
     score (best deals first), falling back to plain lowest-price for
     listings without enough comparables to judge -- "we can't tell if
     it's a deal" isn't the same as "it's not one", so those listings are
-    included after the scored ones rather than excluded.
+    included after the scored ones rather than excluded. Ties are broken
+    by _recency_tiebreak, not score/price alone.
     """
     score = compute_deal_score(listing, all_listings)
+    recency = _recency_tiebreak(listing)
     if score is not None:
-        return (0, -score)
+        return (0, -score, recency)
     price = listing.get("price")
-    return (1, float(price) if price is not None else float("inf"))
+    return (1, float(price) if price is not None else float("inf"), recency)
 
 
 def update_deal_scores(supabase):

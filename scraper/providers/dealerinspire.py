@@ -2,7 +2,7 @@ from playwright.sync_api import sync_playwright
 import json
 
 from options import ScrapeOptions
-from pagination import page_did_not_advance
+from utils.pagination import page_did_not_advance
 
 
 def extract_vehicle_data(card, base_url, city=None, dealer_name=None):
