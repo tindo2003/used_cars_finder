@@ -46,11 +46,22 @@ type SavedSearchPayload = {
     max_price: number | null;
 };
 
+// A logged-in test user with no email set, so page.tsx's "prefill the
+// digest email from the account" effect stays a no-op -- tests that
+// type their own value into the email field don't have to clear it
+// first. LOGGED_IN_USER_WITH_EMAIL below covers the prefill behavior
+// itself.
+const LOGGED_IN_USER = { id: "user-1", email: "" };
+const LOGGED_IN_USER_WITH_EMAIL = { id: "user-1", email: "owner@example.com" };
+
 function makeFakeSupabase({
     listingsResult = { data: [makeListing()], error: null },
     insertResult = { data: { id: "search-1" }, error: null },
     savedSearchesSelectResult = { data: [], error: null },
     deleteResult = { error: null },
+    authUser = null as { id: string; email: string } | null,
+    signInResult = { error: null as { message: string } | null },
+    signUpResult = { error: null as { message: string } | null },
     onInsert,
     onDelete,
 }: {
@@ -58,6 +69,9 @@ function makeFakeSupabase({
     insertResult?: { data?: unknown; error: unknown };
     savedSearchesSelectResult?: { data: unknown[]; error: unknown };
     deleteResult?: { error: unknown };
+    authUser?: { id: string; email: string } | null;
+    signInResult?: { error: { message: string } | null };
+    signUpResult?: { error: { message: string } | null };
     onInsert?: (payload: SavedSearchPayload) => void;
     onDelete?: (id: unknown) => void;
 } = {}) {
@@ -103,11 +117,40 @@ function makeFakeSupabase({
         throw new Error(`Unexpected table: ${table}`);
     });
 
-    return { from, listingsQuery, savedSearchesTable };
+    // Mimics the real client closely enough for these tests: a
+    // successful sign-in/sign-up fires the registered
+    // onAuthStateChange listener with a session, just like the real
+    // Supabase client does, since page.tsx relies on that listener
+    // (not signIn/signUp's return value) to update its user state.
+    let authChangeCallback: ((event: string, session: unknown) => void) | null = null;
+    const auth = {
+        getUser: vi.fn(() => Promise.resolve({ data: { user: authUser } })),
+        onAuthStateChange: vi.fn((callback: (event: string, session: unknown) => void) => {
+            authChangeCallback = callback;
+            return { data: { subscription: { unsubscribe: vi.fn() } } };
+        }),
+        signInWithPassword: vi.fn(({ email }: { email: string; password: string }) => {
+            if (!signInResult.error) {
+                authChangeCallback?.("SIGNED_IN", { user: { id: "user-1", email } });
+            }
+            return Promise.resolve(signInResult);
+        }),
+        signUp: vi.fn(({ email }: { email: string; password: string }) => {
+            if (!signUpResult.error) {
+                authChangeCallback?.("SIGNED_IN", { user: { id: "user-1", email } });
+            }
+            return Promise.resolve(signUpResult);
+        }),
+        signOut: vi.fn(() => {
+            authChangeCallback?.("SIGNED_OUT", null);
+            return Promise.resolve({ error: null });
+        }),
+    };
+
+    return { from, auth, listingsQuery, savedSearchesTable };
 }
 
 beforeEach(() => {
-    window.localStorage.clear();
     setFakeSupabase(makeFakeSupabase());
 });
 
@@ -299,11 +342,96 @@ describe("sorting", () => {
     });
 });
 
+describe("auth", () => {
+    it("shows a login form and hides Save Search when logged out", async () => {
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        expect(screen.getByPlaceholderText("Email address")).toBeInTheDocument();
+        expect(screen.getByPlaceholderText("Password")).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Save Search" })).not.toBeInTheDocument();
+    });
+
+    it("logging in with valid credentials switches to the Save Search form", async () => {
+        const user = userEvent.setup();
+        const fake = makeFakeSupabase();
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await user.type(screen.getByPlaceholderText("Email address"), "owner@example.com");
+        await user.type(screen.getByPlaceholderText("Password"), "hunter22");
+        await user.click(screen.getByRole("button", { name: "Log In" }));
+
+        expect(fake.auth.signInWithPassword).toHaveBeenCalledWith({
+            email: "owner@example.com",
+            password: "hunter22",
+        });
+        expect(await screen.findByText(/Signed in as/)).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Save Search" })).toBeInTheDocument();
+    });
+
+    it("shows an error message when login fails", async () => {
+        const user = userEvent.setup();
+        setFakeSupabase(makeFakeSupabase({ signInResult: { error: { message: "Invalid credentials" } } }));
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await user.type(screen.getByPlaceholderText("Email address"), "owner@example.com");
+        await user.type(screen.getByPlaceholderText("Password"), "wrongpass");
+        await user.click(screen.getByRole("button", { name: "Log In" }));
+
+        expect(await screen.findByText("Invalid credentials")).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Save Search" })).not.toBeInTheDocument();
+    });
+
+    it("toggling to sign-up mode and submitting calls signUp instead", async () => {
+        const user = userEvent.setup();
+        const fake = makeFakeSupabase();
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await user.click(screen.getByRole("button", { name: "Sign up" }));
+        await user.type(screen.getByPlaceholderText("Email address"), "new@example.com");
+        await user.type(screen.getByPlaceholderText("Password"), "hunter22");
+        await user.click(screen.getByRole("button", { name: "Sign Up" }));
+
+        expect(fake.auth.signUp).toHaveBeenCalledWith({ email: "new@example.com", password: "hunter22" });
+        expect(fake.auth.signInWithPassword).not.toHaveBeenCalled();
+    });
+
+    it("logging out returns to the login form", async () => {
+        const user = userEvent.setup();
+        const fake = makeFakeSupabase({ authUser: LOGGED_IN_USER });
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText(/Signed in as/);
+
+        await user.click(screen.getByRole("button", { name: "Log out" }));
+
+        expect(fake.auth.signOut).toHaveBeenCalled();
+        expect(await screen.findByPlaceholderText("Email address")).toBeInTheDocument();
+    });
+
+    it("prefills the digest email from the logged-in account", async () => {
+        setFakeSupabase(makeFakeSupabase({ authUser: LOGGED_IN_USER_WITH_EMAIL }));
+        render(<Home />);
+        await screen.findByText(/Signed in as/);
+
+        // The prefill runs in a separate effect cycle right after "user"
+        // is set, one render after the "Signed in as" text commits.
+        await waitFor(() => {
+            expect(screen.getByPlaceholderText("Enter your email")).toHaveValue("owner@example.com");
+        });
+    });
+});
+
 describe("save search", () => {
     it("warns instead of saving when no email is entered", async () => {
         const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
         const user = userEvent.setup();
-        const fake = makeFakeSupabase();
+        const fake = makeFakeSupabase({ authUser: LOGGED_IN_USER });
         setFakeSupabase(fake);
         render(<Home />);
         await screen.findByText("2022 Toyota Camry");
@@ -318,7 +446,7 @@ describe("save search", () => {
     it("asks for confirmation before saving a search with no filters, and respects Cancel", async () => {
         const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
         const user = userEvent.setup();
-        const fake = makeFakeSupabase();
+        const fake = makeFakeSupabase({ authUser: LOGGED_IN_USER });
         setFakeSupabase(fake);
         render(<Home />);
         await screen.findByText("2022 Toyota Camry");
@@ -334,7 +462,7 @@ describe("save search", () => {
     it("saves a no-filter search when the customer confirms the warning", async () => {
         const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
         const user = userEvent.setup();
-        const fake = makeFakeSupabase();
+        const fake = makeFakeSupabase({ authUser: LOGGED_IN_USER });
         setFakeSupabase(fake);
         render(<Home />);
         await screen.findByText("2022 Toyota Camry");
@@ -354,7 +482,7 @@ describe("save search", () => {
     it("saves immediately without confirmation when a real filter is set", async () => {
         const confirmSpy = vi.spyOn(window, "confirm");
         const user = userEvent.setup();
-        const fake = makeFakeSupabase();
+        const fake = makeFakeSupabase({ authUser: LOGGED_IN_USER });
         setFakeSupabase(fake);
         render(<Home />);
         await screen.findByText("2022 Toyota Camry");
@@ -373,7 +501,7 @@ describe("save search", () => {
 
     it("shows a Saved! confirmation after a successful save", async () => {
         const user = userEvent.setup();
-        setFakeSupabase(makeFakeSupabase({ insertResult: { error: null } }));
+        setFakeSupabase(makeFakeSupabase({ authUser: LOGGED_IN_USER, insertResult: { error: null } }));
         render(<Home />);
         await screen.findByText("2022 Toyota Camry");
 
@@ -386,7 +514,7 @@ describe("save search", () => {
 
     it("shows an Error state when the save fails", async () => {
         const user = userEvent.setup();
-        setFakeSupabase(makeFakeSupabase({ insertResult: { error: { message: "boom" } } }));
+        setFakeSupabase(makeFakeSupabase({ authUser: LOGGED_IN_USER, insertResult: { error: { message: "boom" } } }));
         render(<Home />);
         await screen.findByText("2022 Toyota Camry");
 
@@ -399,45 +527,46 @@ describe("save search", () => {
 });
 
 describe("my saved searches", () => {
-    it("shows nothing when this browser hasn't saved any searches", async () => {
+    it("shows nothing when logged out", async () => {
         render(<Home />);
         await screen.findByText("2022 Toyota Camry");
 
         expect(screen.queryByText("My Saved Searches")).not.toBeInTheDocument();
     });
 
-    it("lists a saved search fetched from Supabase for an id already in localStorage", async () => {
-        window.localStorage.setItem("savedSearchIds", JSON.stringify(["search-1"]));
-        setFakeSupabase(
-            makeFakeSupabase({
-                savedSearchesSelectResult: {
-                    data: [
-                        {
-                            id: "search-1",
-                            name: "Lexus ES",
-                            make: "Lexus",
-                            model: "ES",
-                            min_year: 2018,
-                            max_mileage: 60000,
-                            max_price: 30000,
-                            email: "buyer@example.com",
-                        },
-                    ],
-                    error: null,
-                },
-            })
-        );
+    it("lists this account's saved searches fetched from Supabase", async () => {
+        const fake = makeFakeSupabase({
+            authUser: LOGGED_IN_USER,
+            savedSearchesSelectResult: {
+                data: [
+                    {
+                        id: "search-1",
+                        name: "Lexus ES",
+                        make: "Lexus",
+                        model: "ES",
+                        min_year: 2018,
+                        max_mileage: 60000,
+                        max_price: 30000,
+                        email: "buyer@example.com",
+                    },
+                ],
+                error: null,
+            },
+        });
+        setFakeSupabase(fake);
 
         render(<Home />);
 
         expect(await screen.findByText("Lexus ES")).toBeInTheDocument();
         expect(screen.getByText(/Lexus ES — 2018\+, under 60,000 mi, under \$30,000/)).toBeInTheDocument();
+        expect(fake.savedSearchesTable.select).toHaveBeenCalled();
     });
 
     it("appends the new search to the list after a successful save", async () => {
         const user = userEvent.setup();
         setFakeSupabase(
             makeFakeSupabase({
+                authUser: LOGGED_IN_USER,
                 insertResult: {
                     data: { id: "new-search", name: "Honda watch", make: "Honda", email: "buyer@example.com" },
                     error: null,
@@ -453,14 +582,13 @@ describe("my saved searches", () => {
         await user.click(screen.getByRole("button", { name: "Save Search" }));
 
         expect(await screen.findByText("Honda watch")).toBeInTheDocument();
-        expect(JSON.parse(window.localStorage.getItem("savedSearchIds") || "[]")).toEqual(["new-search"]);
     });
 
     it("deletes a saved search from Supabase and removes it from the list", async () => {
-        window.localStorage.setItem("savedSearchIds", JSON.stringify(["search-1"]));
         const onDelete = vi.fn();
         setFakeSupabase(
             makeFakeSupabase({
+                authUser: LOGGED_IN_USER,
                 savedSearchesSelectResult: {
                     data: [{ id: "search-1", name: "Lexus ES", email: "buyer@example.com" }],
                     error: null,
@@ -476,6 +604,5 @@ describe("my saved searches", () => {
 
         await waitFor(() => expect(onDelete).toHaveBeenCalledWith("search-1"));
         expect(screen.queryByText("Lexus ES")).not.toBeInTheDocument();
-        expect(JSON.parse(window.localStorage.getItem("savedSearchIds") || "[]")).toEqual([]);
     });
 });

@@ -38,34 +38,6 @@ const SORT_OPTIONS = [
     { value: "mileage_asc", label: "Lowest Mileage", column: "mileage", ascending: true },
 ] as const;
 
-// There's no auth yet, so saved searches can't be tied to a logged-in
-// user. Instead we track which ones this browser created in
-// localStorage, purely so the same browser can list/delete them later
-// -- it's not a security boundary, just a client-side memory aid.
-const SAVED_SEARCH_IDS_KEY = "savedSearchIds";
-
-function getStoredSearchIds(): string[] {
-    if (typeof window === "undefined") return [];
-    try {
-        const raw = window.localStorage.getItem(SAVED_SEARCH_IDS_KEY);
-        return raw ? JSON.parse(raw) : [];
-    } catch {
-        return [];
-    }
-}
-
-function addStoredSearchId(id: string) {
-    const ids = getStoredSearchIds();
-    if (!ids.includes(id)) {
-        window.localStorage.setItem(SAVED_SEARCH_IDS_KEY, JSON.stringify([...ids, id]));
-    }
-}
-
-function removeStoredSearchId(id: string) {
-    const ids = getStoredSearchIds().filter((existingId) => existingId !== id);
-    window.localStorage.setItem(SAVED_SEARCH_IDS_KEY, JSON.stringify(ids));
-}
-
 function describeSavedSearch(search: any) {
     const parts = [];
     if (search.make) parts.push(search.make);
@@ -103,6 +75,36 @@ export default function Home() {
         "idle" | "loading" | "success" | "error"
     >("idle");
     const [mySavedSearches, setMySavedSearches] = useState<any[]>([]);
+
+    // --- Auth State ---
+    const [user, setUser] = useState<any>(null);
+    const [authMode, setAuthMode] = useState<"signIn" | "signUp">("signIn");
+    const [authEmail, setAuthEmail] = useState("");
+    const [authPassword, setAuthPassword] = useState("");
+    const [authError, setAuthError] = useState<string | null>(null);
+    const [authSubmitting, setAuthSubmitting] = useState(false);
+
+    useEffect(() => {
+        supabase.auth.getUser().then(({ data }) => {
+            setUser(data.user ?? null);
+        });
+
+        const {
+            data: { subscription },
+        } = supabase.auth.onAuthStateChange((_event, session) => {
+            setUser(session?.user ?? null);
+        });
+
+        return () => subscription.unsubscribe();
+    }, [supabase]);
+
+    // Prefills the digest-recipient email from the logged-in account once
+    // available, without clobbering anything the customer already typed.
+    useEffect(() => {
+        if (user?.email) {
+            setEmail((prev) => prev || user.email);
+        }
+    }, [user]);
 
     // --- Core Logic ---
     const fetchListings = useCallback(async () => {
@@ -147,19 +149,18 @@ export default function Home() {
     }, [fetchListings]);
 
     const fetchMySavedSearches = useCallback(async () => {
-        const ids = getStoredSearchIds();
-        if (ids.length === 0) {
+        if (!user) {
             setMySavedSearches([]);
             return;
         }
         const { data, error: fetchError } = await supabase
             .from("saved_searches")
             .select("*")
-            .in("id", ids);
+            .eq("user_id", user.id);
         if (!fetchError) {
             setMySavedSearches(data || []);
         }
-    }, [supabase]);
+    }, [supabase, user]);
 
     useEffect(() => {
         fetchMySavedSearches();
@@ -181,6 +182,10 @@ export default function Home() {
 
     const handleSaveSearch = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!user) {
+            alert("Please log in first to save a search.");
+            return;
+        }
         if (!email) {
             alert("Please enter an email address first.");
             return;
@@ -206,6 +211,7 @@ export default function Home() {
         const { data, error } = await supabase
             .from("saved_searches")
             .insert({
+                user_id: user.id,
                 name: searchName.trim() || null,
                 email: email.trim(),
                 make: make.trim() || null,
@@ -225,7 +231,6 @@ export default function Home() {
             setSaveStatus("success");
             setSearchName("");
             if (data?.id) {
-                addStoredSearchId(data.id);
                 setMySavedSearches((prev) => [...prev, data]);
             }
             setTimeout(() => setSaveStatus("idle"), 3000);
@@ -238,8 +243,30 @@ export default function Home() {
             console.error("Supabase Delete Error:", error);
             return;
         }
-        removeStoredSearchId(id);
         setMySavedSearches((prev) => prev.filter((search) => search.id !== id));
+    };
+
+    const handleAuthSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setAuthSubmitting(true);
+        setAuthError(null);
+
+        const { error } =
+            authMode === "signUp"
+                ? await supabase.auth.signUp({ email: authEmail.trim(), password: authPassword })
+                : await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPassword });
+
+        if (error) {
+            setAuthError(error.message);
+        } else {
+            setAuthEmail("");
+            setAuthPassword("");
+        }
+        setAuthSubmitting(false);
+    };
+
+    const handleSignOut = async () => {
+        await supabase.auth.signOut();
     };
 
     // --- UI Components ---
@@ -488,61 +515,143 @@ export default function Home() {
                 </section>
 
                 {/* Save Search Alert Card */}
-                <section className="bg-blue-50 border border-blue-200 p-6 rounded-2xl shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
-                    <div>
-                        <h3 className="text-blue-900 font-bold text-lg">
-                            Don't see what you want?
-                        </h3>
-                        <p className="text-blue-700 text-sm mt-1">
-                            Save these exact filters and we'll email you when a
-                            match is posted.
-                        </p>
-                    </div>
+                <section className="bg-blue-50 border border-blue-200 p-6 rounded-2xl shadow-sm">
+                    {!user ? (
+                        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                            <div>
+                                <h3 className="text-blue-900 font-bold text-lg">
+                                    Don't see what you want?
+                                </h3>
+                                <p className="text-blue-700 text-sm mt-1">
+                                    Log in to save a search and we'll email you
+                                    when a match is posted.
+                                </p>
+                            </div>
 
-                    <form
-                        onSubmit={handleSaveSearch}
-                        className="flex flex-col md:flex-row w-full md:w-auto gap-3"
-                    >
-                        <input
-                            type="text"
-                            placeholder="Name this search (e.g. Lexus ES)"
-                            value={searchName}
-                            onChange={(e) => setSearchName(e.target.value)}
-                            className={`flex-1 md:w-56 border border-blue-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm ${inputTextClass}`}
-                        />
-                        <input
-                            type="email"
-                            placeholder="Enter your email"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className={`flex-1 md:w-64 border border-blue-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm ${inputTextClass}`}
-                        />
-                        <button
-                            type="submit"
-                            disabled={
-                                saveStatus === "loading" ||
-                                saveStatus === "success"
-                            }
-                            className={`font-bold py-3 px-6 rounded-lg text-sm whitespace-nowrap transition ${
-                                saveStatus === "success"
-                                    ? "bg-green-600 hover:bg-green-700 text-white"
-                                    : saveStatus === "error"
-                                      ? "bg-red-600 hover:bg-red-700 text-white"
-                                      : "bg-blue-600 hover:bg-blue-700 text-white"
-                            }`}
-                        >
-                            {saveStatus === "loading"
-                                ? "Saving..."
-                                : saveStatus === "success"
-                                  ? "Saved!"
-                                  : saveStatus === "error"
-                                    ? "Error"
-                                    : "Save Search"}
-                        </button>
-                    </form>
+                            <div className="w-full md:w-auto">
+                                <form
+                                    onSubmit={handleAuthSubmit}
+                                    className="flex flex-col md:flex-row w-full md:w-auto gap-3"
+                                >
+                                    <input
+                                        type="email"
+                                        placeholder="Email address"
+                                        value={authEmail}
+                                        onChange={(e) => setAuthEmail(e.target.value)}
+                                        required
+                                        className={`flex-1 md:w-56 border border-blue-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm ${inputTextClass}`}
+                                    />
+                                    <input
+                                        type="password"
+                                        placeholder="Password"
+                                        value={authPassword}
+                                        onChange={(e) => setAuthPassword(e.target.value)}
+                                        required
+                                        minLength={6}
+                                        className={`flex-1 md:w-48 border border-blue-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm ${inputTextClass}`}
+                                    />
+                                    <button
+                                        type="submit"
+                                        disabled={authSubmitting}
+                                        className="font-bold py-3 px-6 rounded-lg text-sm whitespace-nowrap transition bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-60"
+                                    >
+                                        {authSubmitting
+                                            ? "..."
+                                            : authMode === "signUp"
+                                              ? "Sign Up"
+                                              : "Log In"}
+                                    </button>
+                                </form>
+                                <p className="text-blue-700 text-xs mt-2 text-right">
+                                    {authMode === "signUp" ? "Already have an account? " : "New here? "}
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setAuthMode(authMode === "signUp" ? "signIn" : "signUp");
+                                            setAuthError(null);
+                                        }}
+                                        className="font-semibold underline"
+                                    >
+                                        {authMode === "signUp" ? "Log in" : "Sign up"}
+                                    </button>
+                                </p>
+                                {authError && (
+                                    <p className="text-red-600 text-xs mt-1 text-right">{authError}</p>
+                                )}
+                            </div>
+                        </div>
+                    ) : (
+                        <>
+                            <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-4">
+                                <div>
+                                    <h3 className="text-blue-900 font-bold text-lg">
+                                        Don't see what you want?
+                                    </h3>
+                                    <p className="text-blue-700 text-sm mt-1">
+                                        Save these exact filters and we'll
+                                        email you when a match is posted.
+                                    </p>
+                                </div>
+                                <div className="text-sm text-blue-700 flex items-center gap-3 whitespace-nowrap">
+                                    <span>
+                                        Signed in as{" "}
+                                        <span className="font-semibold">{user.email}</span>
+                                    </span>
+                                    <button
+                                        onClick={handleSignOut}
+                                        className="text-blue-900 font-semibold hover:underline"
+                                    >
+                                        Log out
+                                    </button>
+                                </div>
+                            </div>
+
+                            <form
+                                onSubmit={handleSaveSearch}
+                                className="flex flex-col md:flex-row w-full gap-3"
+                            >
+                                <input
+                                    type="text"
+                                    placeholder="Name this search (e.g. Lexus ES)"
+                                    value={searchName}
+                                    onChange={(e) => setSearchName(e.target.value)}
+                                    className={`flex-1 md:w-56 border border-blue-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm ${inputTextClass}`}
+                                />
+                                <input
+                                    type="email"
+                                    placeholder="Enter your email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    className={`flex-1 md:w-64 border border-blue-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm ${inputTextClass}`}
+                                />
+                                <button
+                                    type="submit"
+                                    disabled={
+                                        saveStatus === "loading" ||
+                                        saveStatus === "success"
+                                    }
+                                    className={`font-bold py-3 px-6 rounded-lg text-sm whitespace-nowrap transition ${
+                                        saveStatus === "success"
+                                            ? "bg-green-600 hover:bg-green-700 text-white"
+                                            : saveStatus === "error"
+                                              ? "bg-red-600 hover:bg-red-700 text-white"
+                                              : "bg-blue-600 hover:bg-blue-700 text-white"
+                                    }`}
+                                >
+                                    {saveStatus === "loading"
+                                        ? "Saving..."
+                                        : saveStatus === "success"
+                                          ? "Saved!"
+                                          : saveStatus === "error"
+                                            ? "Error"
+                                            : "Save Search"}
+                                </button>
+                            </form>
+                        </>
+                    )}
                 </section>
 
-                {/* My Saved Searches (tracked in this browser only) */}
+                {/* My Saved Searches */}
                 {mySavedSearches.length > 0 && (
                     <section className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
                         <h3 className="font-bold text-slate-900 text-lg mb-4">
