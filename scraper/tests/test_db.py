@@ -12,6 +12,7 @@ def make_progress(last_log=None):
         "saved": 0,
         "inserted": 0,
         "updated": 0,
+        "skipped": 0,
         "last_log": last_log if last_log is not None else time.monotonic(),
     }
 
@@ -217,6 +218,55 @@ def test_upsert_keeps_the_same_vin_from_a_different_dealer_as_a_separate_row():
     assert {row["dealer_name"] for row in rows} == {"Capitol Honda", "Capitol Ford"}
 
 
+def test_upsert_skips_when_original_url_collides_with_a_different_dealers_row():
+    # A dealer's own inventory card can link straight to a DIFFERENT
+    # dealer's detail page for the same physical vehicle (observed live:
+    # a Capitol Honda card linking to chevroletoffremont.com). The new
+    # car's (vin, dealer_name) upsert doesn't match any existing row, so
+    # Postgres tries to INSERT -- and that INSERT collides with the
+    # existing row's original_url, which has its own separate table-wide
+    # uniqueness. Should skip rather than overwrite that row's identity.
+    supabase = FakeSupabase(
+        initial_data={
+            "listings": [
+                {
+                    "id": "1",
+                    "vin": "JF2SKAJC5SH408677",
+                    "dealer_name": "Fremont Chevrolet",
+                    "original_url": "https://www.chevroletoffremont.com/used-...-JF2SKAJC5SH408677",
+                }
+            ]
+        }
+    )
+    db = DbClient(supabase)
+
+    result = db.upsert(
+        {
+            "vin": "JF2SKAJC5SH408677",
+            "dealer_name": "Capitol Honda",
+            "original_url": "https://www.chevroletoffremont.com/used-...-JF2SKAJC5SH408677",
+        }
+    )
+
+    assert result is None
+    rows = supabase.table("listings").data
+    assert len(rows) == 1
+    assert rows[0]["dealer_name"] == "Fremont Chevrolet"
+
+
+def test_is_original_url_conflict_only_matches_the_specific_constraint():
+    from db import _is_original_url_conflict
+
+    class FakeError:
+        def __init__(self, code, message):
+            self.code = code
+            self.message = message
+
+    assert _is_original_url_conflict(FakeError("23505", 'violates unique constraint "listings_original_url_key"'))
+    assert not _is_original_url_conflict(FakeError("23505", 'violates unique constraint "listings_vin_dealer_name_key"'))
+    assert not _is_original_url_conflict(FakeError("23503", 'violates unique constraint "listings_original_url_key"'))
+
+
 # --- bulk_save ---
 
 
@@ -276,6 +326,34 @@ def test_bulk_save_tracks_inserted_vs_updated_counts():
     assert progress["saved"] == 3
     assert progress["inserted"] == 2
     assert progress["updated"] == 1
+
+
+def test_bulk_save_tracks_skipped_count_for_cross_dealer_url_collisions():
+    supabase = FakeSupabase(
+        initial_data={
+            "listings": [
+                {
+                    "id": "1",
+                    "vin": "SHARED-VIN",
+                    "dealer_name": "Fremont Chevrolet",
+                    "original_url": "https://www.chevroletoffremont.com/shared",
+                }
+            ]
+        }
+    )
+    db = DbClient(supabase)
+    progress = make_progress()
+    cars = [
+        {"vin": "SHARED-VIN", "dealer_name": "Capitol Honda", "original_url": "https://www.chevroletoffremont.com/shared"},
+        {"vin": "BRAND-NEW", "dealer_name": "Capitol Honda", "original_url": "https://example.com/new"},
+    ]
+
+    db.bulk_save(cars, dry_run=False, progress=progress, log_interval_seconds=9999)
+
+    assert progress["saved"] == 2
+    assert progress["skipped"] == 1
+    assert progress["inserted"] == 1
+    assert progress["updated"] == 0
 
 
 def test_bulk_save_throttles_progress_logging(capsys):

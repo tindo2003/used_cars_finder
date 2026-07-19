@@ -2,9 +2,12 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 
+from postgrest.exceptions import APIError
 from supabase import create_client
 
 from utils.timestamps import parse_timestamp
+
+ORIGINAL_URL_UNIQUE_CONSTRAINT = "listings_original_url_key"
 
 # How close a returned row's created_at has to be to the last_seen_at we
 # just stamped to count as "this upsert inserted the row" rather than
@@ -58,6 +61,10 @@ def _row_was_inserted(last_seen_at, returned_row):
     return abs(stamped_at - created_at) < NEW_ROW_TOLERANCE
 
 
+def _is_original_url_conflict(error):
+    return error.code == "23505" and ORIGINAL_URL_UNIQUE_CONSTRAINT in (error.message or "")
+
+
 class DbClient:
     """Generic CRUD access to a Supabase table (defaults to `listings`)."""
 
@@ -105,13 +112,33 @@ class DbClient:
         recency tiebreak both key off of.
 
         Returns True if this call inserted a brand-new row, False if it
-        updated an existing one -- determined from the same response,
-        no extra round trip (see _row_was_inserted).
+        updated an existing one, or None if the car was skipped entirely
+        (see below) -- determined from the same response, no extra
+        round trip (see _row_was_inserted).
         """
         last_seen_at = datetime.now(timezone.utc).isoformat()
         car = dict(car, status="active", last_seen_at=last_seen_at)
         conflict_key = get_conflict_key(car)
-        result = self._table().upsert(car, on_conflict=conflict_key).execute()
+
+        try:
+            result = self._table().upsert(car, on_conflict=conflict_key).execute()
+        except APIError as error:
+            if conflict_key != "original_url" and _is_original_url_conflict(error):
+                # A dealer site's own inventory card can link straight to
+                # a DIFFERENT dealer's detail page for the same physical
+                # vehicle -- observed live: a Capitol Honda card linking
+                # to chevroletoffremont.com (see providers/dealerinspire.py,
+                # which takes original_url verbatim from the card's own
+                # href, not from base_url). original_url's uniqueness is
+                # table-wide, so upserting on (vin, dealer_name) is blind
+                # to it already belonging to another dealer's row. Skip
+                # rather than overwrite that row's identity through a
+                # side door -- the exact class of bug get_conflict_key's
+                # (vin, dealer_name) key exists to prevent, just tripped
+                # via a different column this time.
+                return None
+            raise
+
         return _row_was_inserted(last_seen_at, result.data[0] if result.data else {})
 
     def bulk_save(self, cars, dry_run, progress, log_interval_seconds):
@@ -122,15 +149,19 @@ class DbClient:
                 )
                 continue
 
-            inserted = self.upsert(car)
+            result = self.upsert(car)
 
             # Every car scraped gets upserted (deduped on vin/original_url,
             # see get_conflict_key), so "saved" counts records processed
             # this run, not distinct rows in the table -- "inserted" vs.
-            # "updated" is the actual new-vs-already-existed breakdown.
+            # "updated" vs. "skipped" is the actual breakdown.
             progress["saved"] += 1
-            progress["inserted"] = progress.get("inserted", 0) + (1 if inserted else 0)
-            progress["updated"] = progress.get("updated", 0) + (0 if inserted else 1)
+            if result is None:
+                progress["skipped"] = progress.get("skipped", 0) + 1
+            elif result:
+                progress["inserted"] = progress.get("inserted", 0) + 1
+            else:
+                progress["updated"] = progress.get("updated", 0) + 1
             now = time.monotonic()
             if now - progress["last_log"] >= log_interval_seconds:
                 print(f"✅ Processed {progress['saved']} listings so far (deduped on save)...")

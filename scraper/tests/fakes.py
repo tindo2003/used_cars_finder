@@ -7,6 +7,8 @@ DbClient and the notification matching engine without any network calls.
 
 import itertools
 
+from postgrest.exceptions import APIError
+
 _id_counter = itertools.count(1)
 
 
@@ -101,6 +103,30 @@ class FakeQuery:
             if existing is not None:
                 existing.update(self.payload)
                 return FakeResult([existing])
+
+            # Real Postgres checks EVERY unique constraint on the table,
+            # not just the one named in on_conflict -- original_url has
+            # its own separate table-wide uniqueness independent of
+            # (vin, dealer_name). Simulate that here so db.py's handling
+            # of the cross-dealer-link-collision case is testable.
+            if "original_url" not in conflict_columns and self.payload.get("original_url"):
+                url_conflict = next(
+                    (row for row in self.table.data if row.get("original_url") == self.payload.get("original_url")),
+                    None,
+                )
+                if url_conflict is not None:
+                    raise APIError(
+                        {
+                            "message": (
+                                'duplicate key value violates unique constraint '
+                                '"listings_original_url_key"'
+                            ),
+                            "code": "23505",
+                            "hint": None,
+                            "details": f"Key (original_url)=({self.payload.get('original_url')}) already exists.",
+                        }
+                    )
+
             row = dict(self.payload)
             row.setdefault("id", f"generated-{next(_id_counter)}")
             # Mimics a real created_at default now(): fired fresh on
