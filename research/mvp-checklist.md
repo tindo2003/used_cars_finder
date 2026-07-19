@@ -37,10 +37,11 @@ Flagged independently by this doc (2026-07-18) and by external PRD review (2026-
 - [x] Unfiltered ("no criteria set") searches fall back to the N cheapest active listings overall, both in the backend and with a frontend warning before saving such a search
 - [x] Verified live: real Resend emails sent for a real saved search, re-run confirmed as 0 duplicate sends
 - [x] 17+ unit tests (`tests/test_notifications.py`) covering match logic, batching, and the unfiltered-search fallback
+- [x] Notification checking split into its own workflow (`.github/workflows/notify.yml`, `scraper/notify.py`), separate from scraping — lighter (no Playwright), and not delayed by slow scrape runs
 - [ ] Browser push notifications — not built (email-only; sufficient for single-user/personal use so far)
 - [ ] **Handling of updated listings** (new, external review 2026-07-19) — an already-notified listing never re-triggers even on a material price drop afterward. Not yet decided whether/how to address.
 - [ ] **Notification preferences** (new, external review 2026-07-19) — no user-configurable frequency or unsubscribe flow yet.
-- [ ] Worst-case latency is one scrape cycle (~15 min via GitHub Actions cron), not truly real-time — acceptable for personal use, noted as a gap against the PRD's "prioritize speed" wording.
+- **Cadence decision (2026-07-19):** runs once daily, not every 15 min — an explicit user choice to avoid frequent emails, made after discussing the tradeoff against the PRD's "prioritize speed" wording (3.6). This supersedes that PRD line for the current single-user deployment; revisit if this becomes multi-user.
 
 ## Auth — not started
 
@@ -100,6 +101,6 @@ New PRD section 9 proposes: notification click-through rate (not instrumented), 
 2. **Sorting control on the frontend** (Lowest Price or deal-adjusted, pending #1) — cheap, high-value for this audience.
 3. **Cross-marketplace duplicate detection** — even a crude heuristic improves perceived quality as more sources get added.
 4. **Auth** — unlocks Favorites, saved-search edit/enable-disable, and true cross-device sync; the Saved Searches localStorage stopgap proves the no-auth pattern works if Auth keeps getting deferred.
-5. **Notification gaps** — updated-listing handling, preferences/unsubscribe, and (optionally) tightening latency below one scrape cycle.
+5. **Notification gaps** — updated-listing handling and preferences/unsubscribe (e.g. a per-user configurable cadence, now that daily-vs-frequent is a real product decision rather than an assumption).
 6. **Remaining filters (transmission, seller type) + listing detail page** — lower priority for this audience than for a general-purpose shopper, but still part of the PRD.
 7. **Additional Bay Area dealer coverage + geocoding for radius search** — expand breadth once the core loop is fully tuned. Additional marketplace *types* (Cars.com, Autotrader, Facebook Marketplace) rank below this for a deal-hunter audience.

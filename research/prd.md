@@ -122,7 +122,7 @@ The web application supports browser notifications for users who grant permissio
 Notification delivery should prioritize speed over batching.
 
 **Expanded per external review (2026-07-19):**
-- **Latency:** built and running — a GitHub Actions cron scrapes every 15 minutes; matching against saved searches runs at the end of each scrape. Worst-case latency is one scrape interval (~15 min), not truly real-time, which is a real gap against "prioritize speed."
+- **Latency:** built and running, but no longer "prioritize speed" by design — notification checking runs on its own GitHub Actions cron (`.github/workflows/notify.yml`), separate from the scraper's, and was deliberately set to **once daily** per an explicit user decision (2026-07-19) to avoid frequent emails. This directly supersedes this section's "prioritize speed over batching" line for the current single-user deployment; revisit if/when this becomes multi-user, since not every user will want the same tradeoff.
 - **Duplicate prevention:** built — a `notification_history` table with a unique `(saved_search_id, listing_id)` constraint guarantees a given listing never re-notifies the same saved search, and survives crashes/re-runs cleanly.
 - **Handling of updated listings (e.g., a price drop on a listing already notified):** not handled — an already-notified listing never re-triggers even if its price changes materially afterward. Genuine gap, not yet decided whether/how to address for MVP.
 - **Notification preferences (frequency, channels, opt-out):** not built — email only (via Resend), no user-configurable frequency or unsubscribe flow yet. Browser push (also named in this section) remains unbuilt.
