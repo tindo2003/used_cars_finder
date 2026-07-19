@@ -96,6 +96,10 @@ export default function Home() {
     >("idle");
     const [mySavedSearches, setMySavedSearches] = useState<any[]>([]);
 
+    // --- Favorites State ---
+    const [favoriteListingIds, setFavoriteListingIds] = useState<Set<string>>(new Set());
+    const [myFavorites, setMyFavorites] = useState<any[]>([]);
+
     // --- Auth State ---
     const [user, setUser] = useState<any>(null);
     const [authMode, setAuthMode] = useState<"signIn" | "signUp">("signIn");
@@ -186,6 +190,27 @@ export default function Home() {
         fetchMySavedSearches();
     }, [fetchMySavedSearches]);
 
+    const fetchMyFavorites = useCallback(async () => {
+        if (!user) {
+            setMyFavorites([]);
+            setFavoriteListingIds(new Set());
+            return;
+        }
+        const { data, error: fetchError } = await supabase
+            .from("favorites")
+            .select("*, listings(*)")
+            .eq("user_id", user.id);
+        if (!fetchError) {
+            const favoritedListings = (data || []).map((row: any) => row.listings).filter(Boolean);
+            setMyFavorites(favoritedListings);
+            setFavoriteListingIds(new Set(favoritedListings.map((listing: any) => listing.id)));
+        }
+    }, [supabase, user]);
+
+    useEffect(() => {
+        fetchMyFavorites();
+    }, [fetchMyFavorites]);
+
     // --- Handlers ---
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault();
@@ -266,6 +291,39 @@ export default function Home() {
         setMySavedSearches((prev) => prev.filter((search) => search.id !== id));
     };
 
+    const handleToggleFavorite = async (car: any) => {
+        if (!user) return;
+
+        const isFavorited = favoriteListingIds.has(car.id);
+        if (isFavorited) {
+            const { error } = await supabase
+                .from("favorites")
+                .delete()
+                .eq("user_id", user.id)
+                .eq("listing_id", car.id);
+            if (error) {
+                console.error("Supabase Delete Error:", error);
+                return;
+            }
+            setFavoriteListingIds((prev) => {
+                const next = new Set(prev);
+                next.delete(car.id);
+                return next;
+            });
+            setMyFavorites((prev) => prev.filter((listing) => listing.id !== car.id));
+        } else {
+            const { error } = await supabase
+                .from("favorites")
+                .insert({ user_id: user.id, listing_id: car.id });
+            if (error) {
+                console.error("Supabase Insert Error:", error);
+                return;
+            }
+            setFavoriteListingIds((prev) => new Set(prev).add(car.id));
+            setMyFavorites((prev) => [...prev, car]);
+        }
+    };
+
     const handleAuthSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setAuthSubmitting(true);
@@ -290,6 +348,92 @@ export default function Home() {
     };
 
     // --- UI Components ---
+    const renderCarCard = (car: any) => {
+        const isFavorited = favoriteListingIds.has(car.id);
+        return (
+            <div
+                key={car.id}
+                className="flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow"
+            >
+                {/* Image Section */}
+                <div className="h-48 bg-slate-100 flex items-center justify-center border-b border-slate-100 overflow-hidden relative">
+                    {car.is_good_deal && (
+                        <span className="absolute top-2 left-2 z-10 bg-amber-400 text-amber-950 text-xs font-bold px-2 py-1 rounded-full shadow">
+                            🔥 Good Deal
+                            {typeof car.deal_score === "number"
+                                ? ` · ${Math.round(car.deal_score * 100)}% off`
+                                : ""}
+                        </span>
+                    )}
+                    {user && (
+                        <button
+                            onClick={() => handleToggleFavorite(car)}
+                            aria-label={
+                                isFavorited
+                                    ? `Remove ${car.model_year} ${car.make} ${car.model} from favorites`
+                                    : `Add ${car.model_year} ${car.make} ${car.model} to favorites`
+                            }
+                            className="absolute top-2 right-2 z-10 w-8 h-8 flex items-center justify-center bg-white/90 rounded-full shadow hover:bg-white transition text-lg"
+                        >
+                            {isFavorited ? "❤️" : "🤍"}
+                        </button>
+                    )}
+                    {car.photos && car.photos.length > 0 ? (
+                        <Image
+                            src={car.photos[0]}
+                            alt={`${car.model_year} ${car.make} ${car.model}`}
+                            fill
+                            className="object-cover"
+                            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                        />
+                    ) : (
+                        <span className="text-slate-400 text-sm font-medium">
+                            NO IMAGE
+                        </span>
+                    )}
+                </div>
+                <div className="p-5 flex flex-col flex-1">
+                    <div className="flex justify-between items-start mb-3">
+                        <h2 className="text-lg font-bold text-slate-900 leading-tight">
+                            {car.model_year} {car.make} {car.model}
+                        </h2>
+                        <span className="text-lg font-bold text-emerald-600">
+                            ${car.price?.toLocaleString()}
+                        </span>
+                    </div>
+
+                    <div className="space-y-1 mb-6 flex-1 text-sm text-slate-600">
+                        <p>
+                            {car.mileage
+                                ? `${car.mileage.toLocaleString()} miles`
+                                : "Mileage not listed"}
+                        </p>
+                        <p>
+                            Source:{" "}
+                            <span className="font-medium text-slate-800">
+                                {getSellerLabel(car)}
+                            </span>
+                        </p>
+                        {formatLastSeen(car.last_seen_at) && (
+                            <p className="text-xs text-slate-400">
+                                {formatLastSeen(car.last_seen_at)}
+                            </p>
+                        )}
+                    </div>
+
+                    <a
+                        href={car.original_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full text-center bg-slate-900 text-white font-medium py-2.5 rounded-lg hover:bg-slate-800 transition"
+                    >
+                        View Listing
+                    </a>
+                </div>
+            </div>
+        );
+    };
+
     const renderListings = () => {
         if (loading) {
             return (
@@ -327,75 +471,7 @@ export default function Home() {
 
         return (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {listings.map((car) => (
-                    <div
-                        key={car.id}
-                        className="flex flex-col bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow"
-                    >
-                        {/* Image Section */}
-                        <div className="h-48 bg-slate-100 flex items-center justify-center border-b border-slate-100 overflow-hidden relative">
-                            {car.is_good_deal && (
-                                <span className="absolute top-2 left-2 z-10 bg-amber-400 text-amber-950 text-xs font-bold px-2 py-1 rounded-full shadow">
-                                    🔥 Good Deal
-                                    {typeof car.deal_score === "number"
-                                        ? ` · ${Math.round(car.deal_score * 100)}% off`
-                                        : ""}
-                                </span>
-                            )}
-                            {car.photos && car.photos.length > 0 ? (
-                                <Image
-                                    src={car.photos[0]}
-                                    alt={`${car.model_year} ${car.make} ${car.model}`}
-                                    fill
-                                    className="object-cover"
-                                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                                />
-                            ) : (
-                                <span className="text-slate-400 text-sm font-medium">
-                                    NO IMAGE
-                                </span>
-                            )}
-                        </div>
-                        <div className="p-5 flex flex-col flex-1">
-                            <div className="flex justify-between items-start mb-3">
-                                <h2 className="text-lg font-bold text-slate-900 leading-tight">
-                                    {car.model_year} {car.make} {car.model}
-                                </h2>
-                                <span className="text-lg font-bold text-emerald-600">
-                                    ${car.price?.toLocaleString()}
-                                </span>
-                            </div>
-
-                            <div className="space-y-1 mb-6 flex-1 text-sm text-slate-600">
-                                <p>
-                                    {car.mileage
-                                        ? `${car.mileage.toLocaleString()} miles`
-                                        : "Mileage not listed"}
-                                </p>
-                                <p>
-                                    Source:{" "}
-                                    <span className="font-medium text-slate-800">
-                                        {getSellerLabel(car)}
-                                    </span>
-                                </p>
-                                {formatLastSeen(car.last_seen_at) && (
-                                    <p className="text-xs text-slate-400">
-                                        {formatLastSeen(car.last_seen_at)}
-                                    </p>
-                                )}
-                            </div>
-
-                            <a
-                                href={car.original_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="w-full text-center bg-slate-900 text-white font-medium py-2.5 rounded-lg hover:bg-slate-800 transition"
-                            >
-                                View Listing
-                            </a>
-                        </div>
-                    </div>
-                ))}
+                {listings.map((car) => renderCarCard(car))}
             </div>
         );
     };
@@ -706,6 +782,18 @@ export default function Home() {
                                 </li>
                             ))}
                         </ul>
+                    </section>
+                )}
+
+                {/* My Favorites */}
+                {myFavorites.length > 0 && (
+                    <section className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
+                        <h3 className="font-bold text-slate-900 text-lg mb-4">
+                            My Favorites
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {myFavorites.map((car) => renderCarCard(car))}
+                        </div>
                     </section>
                 )}
 

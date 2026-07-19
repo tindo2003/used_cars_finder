@@ -59,21 +59,31 @@ function makeFakeSupabase({
     insertResult = { data: { id: "search-1" }, error: null },
     savedSearchesSelectResult = { data: [], error: null },
     deleteResult = { error: null },
+    favoritesSelectResult = { data: [] as { listings: unknown }[], error: null },
+    favoriteInsertResult = { error: null as { message: string } | null },
+    favoriteDeleteResult = { error: null as { message: string } | null },
     authUser = null as { id: string; email: string } | null,
     signInResult = { error: null as { message: string } | null },
     signUpResult = { error: null as { message: string } | null },
     onInsert,
     onDelete,
+    onFavoriteInsert,
+    onFavoriteDelete,
 }: {
     listingsResult?: { data: unknown[]; error: unknown };
     insertResult?: { data?: unknown; error: unknown };
     savedSearchesSelectResult?: { data: unknown[]; error: unknown };
     deleteResult?: { error: unknown };
+    favoritesSelectResult?: { data: { listings: unknown }[]; error: unknown };
+    favoriteInsertResult?: { error: { message: string } | null };
+    favoriteDeleteResult?: { error: { message: string } | null };
     authUser?: { id: string; email: string } | null;
     signInResult?: { error: { message: string } | null };
     signUpResult?: { error: { message: string } | null };
     onInsert?: (payload: SavedSearchPayload) => void;
     onDelete?: (id: unknown) => void;
+    onFavoriteInsert?: (payload: { user_id: string; listing_id: string }) => void;
+    onFavoriteDelete?: (userId: unknown, listingId: unknown) => void;
 } = {}) {
     function makeChainable(result: unknown, methods: string[]) {
         const chain: any = {};
@@ -111,9 +121,29 @@ function makeFakeSupabase({
         }),
     };
 
+    const favoritesTable = {
+        select: vi.fn(() => makeChainable(favoritesSelectResult, ["eq"])),
+        insert: vi.fn((payload: { user_id: string; listing_id: string }) => {
+            onFavoriteInsert?.(payload);
+            return Promise.resolve(favoriteInsertResult);
+        }),
+        delete: vi.fn(() => {
+            const chain: any = {};
+            let capturedUserId: unknown;
+            chain.eq = vi.fn((column: string, value: unknown) => {
+                if (column === "user_id") capturedUserId = value;
+                if (column === "listing_id") onFavoriteDelete?.(capturedUserId, value);
+                return chain;
+            });
+            chain.then = (resolve: (value: unknown) => void) => resolve(favoriteDeleteResult);
+            return chain;
+        }),
+    };
+
     const from = vi.fn((table: string) => {
         if (table === "listings") return listingsQuery;
         if (table === "saved_searches") return savedSearchesTable;
+        if (table === "favorites") return favoritesTable;
         throw new Error(`Unexpected table: ${table}`);
     });
 
@@ -147,7 +177,7 @@ function makeFakeSupabase({
         }),
     };
 
-    return { from, auth, listingsQuery, savedSearchesTable };
+    return { from, auth, listingsQuery, savedSearchesTable, favoritesTable };
 }
 
 beforeEach(() => {
@@ -630,5 +660,85 @@ describe("my saved searches", () => {
 
         await waitFor(() => expect(onDelete).toHaveBeenCalledWith("search-1"));
         expect(screen.queryByText("Lexus ES")).not.toBeInTheDocument();
+    });
+});
+
+describe("favorites", () => {
+    it("hides the favorite button when logged out", async () => {
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        expect(screen.queryByLabelText(/favorites/)).not.toBeInTheDocument();
+    });
+
+    it("shows an outlined heart for a listing that isn't favorited yet", async () => {
+        setFakeSupabase(makeFakeSupabase({ authUser: LOGGED_IN_USER }));
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        expect(
+            screen.getByRole("button", { name: "Add 2022 Toyota Camry to favorites" })
+        ).toBeInTheDocument();
+    });
+
+    it("favoriting a listing calls insert and flips the icon to filled", async () => {
+        const user = userEvent.setup();
+        const fake = makeFakeSupabase({ authUser: LOGGED_IN_USER });
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await user.click(screen.getByRole("button", { name: "Add 2022 Toyota Camry to favorites" }));
+
+        expect(fake.favoritesTable.insert).toHaveBeenCalledWith({
+            user_id: "user-1",
+            listing_id: "listing-1",
+        });
+        // Now favorited, so it renders both in the main grid and the new
+        // "My Favorites" section -- two matching buttons is correct here.
+        expect(
+            await screen.findAllByRole("button", { name: "Remove 2022 Toyota Camry from favorites" })
+        ).toHaveLength(2);
+    });
+
+    it("unfavoriting a listing calls delete with the right user and listing", async () => {
+        const user = userEvent.setup();
+        const onFavoriteDelete = vi.fn();
+        const fake = makeFakeSupabase({
+            authUser: LOGGED_IN_USER,
+            favoritesSelectResult: { data: [{ listings: makeListing() }], error: null },
+            onFavoriteDelete,
+        });
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findAllByRole("button", { name: "Remove 2022 Toyota Camry from favorites" });
+
+        await user.click(screen.getAllByRole("button", { name: "Remove 2022 Toyota Camry from favorites" })[0]);
+
+        await waitFor(() => expect(onFavoriteDelete).toHaveBeenCalledWith("user-1", "listing-1"));
+    });
+
+    it("shows a My Favorites section listing favorited cars, hidden when empty", async () => {
+        setFakeSupabase(
+            makeFakeSupabase({
+                authUser: LOGGED_IN_USER,
+                favoritesSelectResult: {
+                    data: [{ listings: makeListing({ id: "listing-2", make: "Honda", model: "Civic" }) }],
+                    error: null,
+                },
+            })
+        );
+        render(<Home />);
+
+        expect(await screen.findByText("My Favorites")).toBeInTheDocument();
+        expect(screen.getByText("2022 Honda Civic")).toBeInTheDocument();
+    });
+
+    it("does not show a My Favorites section when there are none", async () => {
+        setFakeSupabase(makeFakeSupabase({ authUser: LOGGED_IN_USER }));
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        expect(screen.queryByText("My Favorites")).not.toBeInTheDocument();
     });
 });
