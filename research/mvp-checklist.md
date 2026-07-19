@@ -51,10 +51,13 @@ Was flagged independently by this doc (2026-07-18) and by external PRD review (2
 - [ ] **Notification preferences** (new, external review 2026-07-19) — no user-configurable frequency or unsubscribe flow yet.
 - **Cadence decision (2026-07-19):** runs once daily, not every 15 min — an explicit user choice to avoid frequent emails, made after discussing the tradeoff against the PRD's "prioritize speed" wording (3.6). This supersedes that PRD line for the current single-user deployment; revisit if this becomes multi-user.
 
-## Auth — not started
+## Auth — built and verified live (2026-07-20)
 
-- [ ] Sign up / log in — Supabase auth client scaffolding exists (`utils/supabase/{client,server,middleware}.ts`) but no login/signup UI or session handling is wired up [5.1]
-- [ ] Persistent user identity (needed for Favorites and true cross-device Saved Searches — both still blocked on this, though Saved Searches now has a no-auth stopgap, see below)
+- [x] Sign up / log in — email + password, built on the existing Supabase auth scaffolding (`utils/supabase/{client,server,middleware}.ts`). Fixed a real gap in that scaffolding along the way: `middleware.ts`'s cookie handlers were never actually triggered (nothing called `getUser()`), and there was no root `middleware.ts` invoking it at all — sessions would never have persisted across requests. Both fixed. "Confirm email" disabled in the Supabase dashboard (manual step) so sign-up returns a session immediately, no callback route needed [5.1]
+- [x] Persistent user identity — `saved_searches` re-scoped from the no-auth localStorage stopgap to real `user_id` + RLS (migration 010, `auth.uid() = user_id`), replacing migration 004's anon-key policies entirely. The localStorage ID-tracking mechanism is fully removed from the frontend. Favorites (schema-only, still no UI) is now unblocked for a fast follow-up.
+- [x] Verified live end-to-end against production: sign-up → immediate session → persists across reload → saved search scoped to the account → survives log-out/log-in → test account and data cleaned up after.
+- [x] 6 new frontend tests for auth (28 total); backend suite (112) unaffected.
+- [ ] Not built: password reset flow, OAuth providers — not needed for personal/single-user use so far.
 
 ## Search & filters (frontend) — partially built
 
@@ -72,21 +75,21 @@ Was flagged independently by this doc (2026-07-18) and by external PRD review (2
 - [ ] Posting time shown on the card (data exists in the DB, not yet rendered)
 - [ ] Dedicated listing detail page: full description, more photos, specs [3.4]
 
-## Saved Searches — mostly built, no-auth stopgap in place
+## Saved Searches — real auth now, cross-device sync works
 
 - [x] Create a named saved search (email + filters, including min year / max mileage) [3.5]
-- [x] List saved searches created in this browser (tracked via localStorage IDs, not real auth) [4.5]
+- [x] List saved searches for the logged-in account, scoped by real `user_id` + RLS (migration 010) — the localStorage-tracking stopgap is gone [4.5]
 - [x] Delete a saved search [4.5]
+- [x] True cross-device sync — unblocked by Auth (2026-07-20); log in from any device, same searches
 - [ ] Edit / rename an existing saved search [4.5]
 - [ ] Enable / disable toggle [4.5]
-- [ ] True cross-device sync — blocked on Auth; current localStorage approach is a deliberate, documented stopgap (see `migrations/004_relax_saved_searches_rls_for_client_list_delete.sql` for the accepted RLS tradeoff)
 
-## Favorites — not started (schema-only)
+## Favorites — not started (schema-only, now unblocked)
 
 - [x] `favorites` table exists in the DB (`user_id`, `listing_id`, `created_at`)
 - [ ] Add/remove favorite UI [3.7, 4.7]
 - [ ] Favorites page [3.2]
-- Blocked on Auth (needs a real `user_id`) for the PRD's "synced across devices" version — but the Saved Searches localStorage pattern above is a proven template for a no-auth stopgap here too, if wanted before Auth exists.
+- No longer blocked on Auth (done 2026-07-20) — this is now the natural fast-follow-up, same `user_id` pattern Saved Searches just adopted.
 
 ## Success Metrics — added 2026-07-19 per external review
 
@@ -109,7 +112,8 @@ New PRD section 9 proposes: notification click-through rate (not instrumented), 
 1. ~~Decide + implement the "good deal" signal~~ — done, see above.
 2. ~~Sorting control + "Good Deal" badge on the frontend~~ — done, see Search & filters / Listings above. Needs migration 005 run in Supabase before "Best Deal" sort/badge show real data.
 3. ~~Cross-marketplace duplicate detection~~ (including same-VIN-different-storefront) — done, see above. Migrations 006, 007, and 008 all run in Supabase 2026-07-20. Fully verified live via a synthetic test upsert (two different dealer_names sharing one VIN correctly persist as 2 rows; re-upserting the same vin+dealer_name pair still updates in place; test rows cleaned up after).
-4. **Auth** — unlocks Favorites, saved-search edit/enable-disable, and true cross-device sync; the Saved Searches localStorage stopgap proves the no-auth pattern works if Auth keeps getting deferred.
-5. **Notification gaps** — updated-listing handling and preferences/unsubscribe (e.g. a per-user configurable cadence, now that daily-vs-frequent is a real product decision rather than an assumption).
-6. **Remaining filters (transmission, seller type) + listing detail page** — lower priority for this audience than for a general-purpose shopper, but still part of the PRD.
-7. **Additional Bay Area dealer coverage + geocoding for radius search** — expand breadth once the core loop is fully tuned. Additional marketplace *types* (Cars.com, Autotrader, Facebook Marketplace) rank below this for a deal-hunter audience.
+4. ~~Auth~~ — done 2026-07-20, see above. Verified live end-to-end; migration 010 run in Supabase.
+5. **Favorites UI** — fast follow-up now that Auth exists; schema (`favorites` table) already in place.
+6. **Notification gaps** — updated-listing handling and preferences/unsubscribe (e.g. a per-user configurable cadence, now that daily-vs-frequent is a real product decision rather than an assumption).
+7. **Remaining filters (transmission, seller type) + listing detail page** — lower priority for this audience than for a general-purpose shopper, but still part of the PRD.
+8. **Additional Bay Area dealer coverage + geocoding for radius search** — expand breadth once the core loop is fully tuned. Additional marketplace *types* (Cars.com, Autotrader, Facebook Marketplace) rank below this for a deal-hunter audience.

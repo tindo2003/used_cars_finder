@@ -4,7 +4,7 @@ A living, high-signal snapshot of this project so a fresh session (any workspace
 
 ## What this is
 
-**Used Car Finder** — a personal (single-user, no auth) tool that scrapes used-car listings from Bay Area dealer sites and Craigslist, lets you define saved searches (make/model/year/mileage/price), and emails you a daily digest of new matches, ranked by an actual "good deal" signal rather than just filter-matching. Audience/vision: `research/prd.md`. Full status snapshot with `[x]`/`[ ]` per feature and the suggested build order: `research/mvp-checklist.md` — **read that one first** when picking up work.
+**Used Car Finder** — a personal tool (single account, email/password auth as of 2026-07-20) that scrapes used-car listings from Bay Area dealer sites and Craigslist, lets you define saved searches (make/model/year/mileage/price), and emails you a daily digest of new matches, ranked by an actual "good deal" signal rather than just filter-matching. Audience/vision: `research/prd.md`. Full status snapshot with `[x]`/`[ ]` per feature and the suggested build order: `research/mvp-checklist.md` — **read that one first** when picking up work.
 
 ## Architecture at a glance
 
@@ -15,30 +15,33 @@ scraper/
   runner.py           ScrapeRunner -- orchestrates "call a scraper, call the DB saver", testable via fakes
   db.py               DbClient -- generic CRUD over any Supabase table (create/read/update/delete/upsert)
   options.py          ScrapeOptions dataclass -- shared config passed into every provider's scrape()
-  pagination.py       page_did_not_advance() -- pure function, detects a stalled "Next" click
   notifications.py    matches() + notify_matches() -- saved-search matching, batched digest emails via Resend
   deals.py            compute_deal_score()/is_good_deal()/update_deal_scores() -- the "good deal" heuristic
   duplicates.py        cross-marketplace + same-VIN duplicate detection, writes duplicate_of
   staleness.py         expire_stale_listings() -- marks status="expired" past a configurable last-seen threshold
-  timestamps.py        parse_timestamp() -- shared Postgres timestamptz string -> datetime helper
+  utils/              small shared pure-function helpers: pagination.py (page_did_not_advance), timestamps.py (parse_timestamp)
   providers/          craigslist.py, dealeron.py, dealerinspire.py (ebay.py exists but is NOT wired in -- see below)
-  tests/              109 tests, fakes.py has a shared in-memory Supabase stand-in with real filter semantics
+  tests/              112 tests, fakes.py has a shared in-memory Supabase stand-in with real filter semantics
 
 app/
   page.tsx            The entire frontend (single page): search/filter/sort, listing cards, save-search flow,
-                      "My Saved Searches" list+delete (localStorage-tracked, no auth)
-  page.test.tsx       22 tests (Vitest + Testing Library)
+                      "My Saved Searches" list+delete, email/password auth (sign up/log in/log out)
+  page.test.tsx       28 tests (Vitest + Testing Library)
+
+middleware.ts          root Next.js middleware -- keeps Supabase sessions alive across requests
+utils/supabase/         client.ts/server.ts/middleware.ts -- Supabase SSR helpers (see Auth decision below)
 
 migrations/           Run manually in the Supabase SQL editor -- nothing here applies itself
   001  dedupe + fix upsert conflict key (vin for dealer sources, original_url for VIN-less)
   002  notification_history table (dedup for notifications)
   003  dealer_name column on listings
-  004  relax RLS so the anon/browser key can select+delete saved_searches (no-auth stopgap)
+  004  relax RLS so the anon/browser key can select+delete saved_searches (no-auth stopgap, superseded by 010)
   005  deal_score + is_good_deal columns on listings
   006  duplicate_of column on listings (cross-marketplace dedup) -- run 2026-07-20
   007  re-keys dealer-source upsert conflict target from vin alone to (vin, dealer_name) -- run 2026-07-20, fixes the "ghost location" bug (see below); its constraint-name guess for the old constraint was wrong so it only added the new composite constraint (didn't remove the old one) -- see 008
   008  drops the stale listings_vin_unique constraint 007 failed to remove -- run 2026-07-20. Combined 007+008 effect verified live via a synthetic test upsert (two dealer_names sharing one VIN now correctly persist as 2 rows; test rows cleaned up after)
-  009  last_seen_at column on listings -- NOT YET RUN as of 2026-07-20; needed before the staleness-expiry feature below is live in production
+  009  last_seen_at column on listings -- run 2026-07-20
+  010  scopes saved_searches RLS to auth.uid() = user_id, replacing migration 004's anon stopgap -- run 2026-07-20, verified live end-to-end (see Auth decision below)
 
 .github/workflows/
   scraper.yml         every 15 min, installs Playwright, runs main.py
@@ -51,7 +54,7 @@ Run tests: `cd scraper && python3 -m pytest tests/ -q` (backend) and `npx vitest
 
 - **eBay is intentionally not scraped.** Its `robots.txt` explicitly disallows the search pattern needed and states automated access is prohibited without permission. `providers/ebay.py` still exists for a possible future pass against their official Browse API, but is not in `main.py`'s `ACTIVE_MARKETPLACES`. Detail: `research/scraping-etiquette.md`.
 - **Notifications run once daily, not every 15 min.** Explicit user choice to avoid frequent emails, even though the PRD says "prioritize speed over batching." This supersedes that PRD line for the current single-user deployment. Notification-checking is a separate GitHub Actions workflow from scraping (lighter, no Playwright, not delayed by slow scrapes).
-- **No auth yet.** Saved Searches has a no-auth stopgap: IDs of searches created in a given browser are tracked in `localStorage`, and RLS was deliberately relaxed (migration 004) so that browser can list/delete its own searches via the anon key. This is a real, accepted tradeoff (any row is technically readable/deletable by anyone calling the API directly), documented in migration 004's comment and `research/mvp-checklist.md`.
+- **Auth: email + password, built 2026-07-20.** Chosen over magic-link specifically because it needs no callback/redirect route -- `signUp`/`signInWithPassword` return a session directly. Requires "Confirm email" disabled in the Supabase dashboard (done) so there's no confirmation-link redirect to handle either. Saved Searches is now scoped to real `user_id` + RLS (migration 010, `auth.uid() = user_id`), replacing the old no-auth localStorage stopgap (migration 004) entirely -- that mechanism is fully removed from the frontend, not just deprecated. Along the way, found and fixed a real gap in the pre-existing Supabase SSR scaffolding: `utils/supabase/middleware.ts` built cookie handlers but never called anything to trigger them, and nothing invoked it from an actual Next.js `middleware.ts` (which didn't exist) -- so sessions would never have persisted across requests. Verified live end-to-end against production: sign-up gives an immediate session, it survives a reload, a saved search is correctly scoped to the account, log-out hides it, log-in restores it; test account and data cleaned up after. Favorites (`user_id`/`listing_id`/`created_at`, schema-only) is the natural fast follow-up now that real user identity exists.
 - **The "good deal" signal is deliberately crude.** Compares a listing's price to the median of other active listings with the same make/model within ±2 model years and ±20,000 miles (needs ≥3 comparables to trust the median); ≥12% below median counts as a deal. No trim-level distinction, no condition/accident history. Full rationale and known limitations: `research/deal-scoring-heuristic.md`.
 - **Dedup key is `(vin, dealer_name)` when vin present, `original_url` as fallback** (changed 2026-07-20 from bare `vin` -- see migration 007 and below). This only catches the same ad seen twice from the *same* dealer/source -- **cross-marketplace duplicate detection** (`scraper/duplicates.py`, built 2026-07-20) is the separate pass that catches the same vehicle posted on two different sources with no shared identifier: (a) a dealer's own site plus its own Craigslist repost -- fuzzy match on make/model/model_year + mileage within 500mi + price within $250 across differing `marketplace_source`; (b) an **exact VIN match**, unconditional and bypassing the fuzzy/marketplace_source checks entirely, added after a user-flagged gap -- dealer groups can syndicate the same VIN across sister storefronts (e.g. a trade-in shows up on both "Capitol Honda" and "Capitol Ford"), which used to be invisible: the old bare-`vin` upsert conflict key made the second store's scrape silently overwrite the first store's dealer_name/city/original_url in place, no duplicate row, no history, just a listing that flip-floped location depending on scrape order. Both paths write `duplicate_of` (migration 006) onto the non-canonical row daily via `notify.py`; frontend and `notify_matches` both exclude flagged duplicates. Verified live 2026-07-20: 0 of 740 active listings shared a VIN at that time (risk was latent, not yet manifested, but real given several dealers are sibling stores in the same ownership group).
 - **Pagination has a stall guard** (`pagination.page_did_not_advance`) after a real bug where "Next" clicks could succeed without the page actually changing, causing the same vehicles to be re-scraped up to hundreds of times in one run. Tested specifically to confirm genuine page-to-page advancing (including partial inventory overlap) is never mistaken for a stall.
@@ -60,7 +63,7 @@ Run tests: `cd scraper && python3 -m pytest tests/ -q` (backend) and `npx vitest
 
 ## Known open items (not yet decided or built)
 
-See `research/mvp-checklist.md`'s "Suggested build order" for the live, prioritized list. As of this writing, next up: **Auth** (unlocks Favorites, saved-search edit/enable-disable, true cross-device sync). Also open: handling of updated listings (price drops on already-notified listings never re-trigger), notification preferences/unsubscribe, browser push notifications, several PRD filters (transmission, seller type, radius search -- blocked on geocoding). Note: migration 006 (duplicate detection) still needs to be run manually in Supabase before it's live in production.
+See `research/mvp-checklist.md`'s "Suggested build order" for the live, prioritized list. As of this writing, next up: **Favorites UI** (schema already exists, unblocked now that Auth is done). Also open: saved-search edit/enable-disable, handling of updated listings (price drops on already-notified listings never re-trigger), notification preferences/unsubscribe, browser push notifications, several PRD filters (transmission, seller type, radius search -- blocked on geocoding). All migrations through 010 have been run in Supabase.
 
 ## Where to look for more
 
