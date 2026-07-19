@@ -8,7 +8,7 @@ Checked against [prd.md](./prd.md) (sections referenced in brackets) and the act
 
 ## "Good deal" signal — built and live (2026-07-19)
 
-Was flagged independently by this doc (2026-07-18) and by external PRD review (2026-07-19) as the most important gap: the PRD promises "good deals" throughout, but nothing in the product evaluated deal quality — search and notifications only checked filter-matching.
+Was flagged independently by this doc (2026-07-18) and by external PRD review (2026-07-19) as the most important gap: the PRD promises "good deals" throughout, but nothing in the product evaluated deal quality — search and notifications only checked filter-matching. Full parameter rationale and known limitations: [deal-scoring-heuristic.md](./deal-scoring-heuristic.md).
 
 - [x] `scraper/deals.py`: `compute_deal_score()` compares a listing's price against the median of other active listings with the same make/model within ±2 model years and ±20,000 miles, requiring at least 3 comparables to trust the median
 - [x] `is_good_deal()` — 12% or more below the comparable median
