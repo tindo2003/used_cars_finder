@@ -60,8 +60,8 @@ const SORT_OPTIONS = [
 
 function describeSavedSearch(search: any) {
     const parts = [];
-    if (search.make) parts.push(search.make);
-    if (search.model) parts.push(search.model);
+    if (search.make?.length) parts.push(search.make.join(", "));
+    if (search.model?.length) parts.push(search.model.join(", "));
     const vehicle = parts.length > 0 ? parts.join(" ") : "Any vehicle";
 
     const filters = [];
@@ -69,15 +69,90 @@ function describeSavedSearch(search: any) {
     if (search.max_mileage) filters.push(`under ${search.max_mileage.toLocaleString()} mi`);
     if (search.max_price) filters.push(`under $${search.max_price.toLocaleString()}`);
 
-    return filters.length > 0 ? `${vehicle} — ${filters.join(", ")}` : vehicle;
+    const description = filters.length > 0 ? `${vehicle} — ${filters.join(", ")}` : vehicle;
+    const grouping =
+        search.notification_grouping && search.notification_grouping !== "combined"
+            ? ` (grouped by ${search.notification_grouping})`
+            : "";
+
+    return description + grouping;
+}
+
+// A minimal checkbox multi-select: no autocomplete, options are just
+// whatever distinct values are already in `listings` (see
+// fetchFilterOptions). Labelable via `<label htmlFor>` so
+// getByLabelText finds the toggle button in tests, same as a plain
+// input would.
+function MultiSelectDropdown({
+    id,
+    label,
+    options,
+    selected,
+    onChange,
+}: {
+    id: string;
+    label: string;
+    options: string[];
+    selected: string[];
+    onChange: (next: string[]) => void;
+}) {
+    const [open, setOpen] = useState(false);
+
+    const toggleValue = (value: string) => {
+        onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
+    };
+
+    const summary = selected.length === 0 ? `All ${label}s` : selected.join(", ");
+
+    return (
+        <div className="relative">
+            <label
+                htmlFor={id}
+                className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
+            >
+                {label}
+            </label>
+            <button
+                id={id}
+                type="button"
+                onClick={() => setOpen((prev) => !prev)}
+                aria-expanded={open}
+                className={`w-full text-left border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition truncate ${inputTextClass}`}
+            >
+                {summary}
+            </button>
+            {open && (
+                <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-slate-300 rounded-lg shadow-lg p-2 space-y-1">
+                    {options.length === 0 && (
+                        <p className="text-sm text-slate-400 px-2 py-1">No options yet</p>
+                    )}
+                    {options.map((option) => (
+                        <label
+                            key={option}
+                            className="flex items-center gap-2 px-2 py-1 rounded hover:bg-slate-50 cursor-pointer text-sm text-slate-800"
+                        >
+                            <input
+                                type="checkbox"
+                                checked={selected.includes(option)}
+                                onChange={() => toggleValue(option)}
+                            />
+                            {option}
+                        </label>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
 }
 
 export default function Home() {
     const supabase = createClient();
 
     // --- Filter State ---
-    const [make, setMake] = useState("");
-    const [model, setModel] = useState("");
+    const [make, setMake] = useState<string[]>([]);
+    const [model, setModel] = useState<string[]>([]);
+    const [availableMakes, setAvailableMakes] = useState<string[]>([]);
+    const [availableModels, setAvailableModels] = useState<string[]>([]);
     const [minYear, setMinYear] = useState(YEAR_MIN);
     const [maxMileage, setMaxMileage] = useState(MILEAGE_MAX);
     const [maxPrice, setMaxPrice] = useState(PRICE_MAX);
@@ -94,6 +169,7 @@ export default function Home() {
     const [saveStatus, setSaveStatus] = useState<
         "idle" | "loading" | "success" | "error"
     >("idle");
+    const [notificationGrouping, setNotificationGrouping] = useState<"combined" | "make" | "model">("combined");
     const [mySavedSearches, setMySavedSearches] = useState<any[]>([]);
 
     // --- Favorites State ---
@@ -151,8 +227,12 @@ export default function Home() {
                 .order(sortOption.column, { ascending: sortOption.ascending, nullsFirst: false })
                 .order("last_seen_at", { ascending: false, nullsFirst: false });
 
-            if (make.trim()) query = query.ilike("make", `%${make.trim()}%`);
-            if (model.trim()) query = query.ilike("model", `%${model.trim()}%`);
+            // ilike with no wildcards is a case-insensitive exact match --
+            // used instead of .in() because dealer feeds aren't
+            // consistent about make/model casing (e.g. "Toyota" vs
+            // "TOYOTA" both appear in production).
+            if (make.length > 0) query = query.or(make.map((m) => `make.ilike.${m}`).join(","));
+            if (model.length > 0) query = query.or(model.map((m) => `model.ilike.${m}`).join(","));
             if (minYear > YEAR_MIN) query = query.gte("model_year", minYear);
             if (maxMileage < MILEAGE_MAX) query = query.lte("mileage", maxMileage);
             if (maxPrice < PRICE_MAX) query = query.lte("price", maxPrice);
@@ -171,6 +251,35 @@ export default function Home() {
     useEffect(() => {
         fetchListings();
     }, [fetchListings]);
+
+    // Populates the make/model multi-select options from whatever
+    // distinct values are actually in the inventory right now -- no
+    // autocomplete, no static list to keep in sync with real data.
+    // Dealer feeds aren't consistent about casing (e.g. "Toyota" vs
+    // "TOYOTA" both appear in production), so options are deduped
+    // case-insensitively -- otherwise the same brand would show up as
+    // several confusing near-duplicate checkboxes.
+    const fetchFilterOptions = useCallback(async () => {
+        const { data, error: fetchError } = await supabase
+            .from("listings")
+            .select("make, model")
+            .eq("status", "active");
+
+        if (!fetchError && data) {
+            const makes = new Map<string, string>();
+            const models = new Map<string, string>();
+            for (const row of data as any[]) {
+                if (row.make && !makes.has(row.make.toLowerCase())) makes.set(row.make.toLowerCase(), row.make);
+                if (row.model && !models.has(row.model.toLowerCase())) models.set(row.model.toLowerCase(), row.model);
+            }
+            setAvailableMakes(Array.from(makes.values()).sort());
+            setAvailableModels(Array.from(models.values()).sort());
+        }
+    }, [supabase]);
+
+    useEffect(() => {
+        fetchFilterOptions();
+    }, [fetchFilterOptions]);
 
     const fetchMySavedSearches = useCallback(async () => {
         if (!user) {
@@ -218,8 +327,8 @@ export default function Home() {
     };
 
     const handleClearFilters = () => {
-        setMake("");
-        setModel("");
+        setMake([]);
+        setModel([]);
         setMinYear(YEAR_MIN);
         setMaxMileage(MILEAGE_MAX);
         setMaxPrice(PRICE_MAX);
@@ -237,8 +346,8 @@ export default function Home() {
         }
 
         const hasNoFilters =
-            !make.trim() &&
-            !model.trim() &&
+            make.length === 0 &&
+            model.length === 0 &&
             minYear === YEAR_MIN &&
             maxMileage === MILEAGE_MAX &&
             maxPrice === PRICE_MAX;
@@ -259,11 +368,12 @@ export default function Home() {
                 user_id: user.id,
                 name: searchName.trim() || null,
                 email: email.trim(),
-                make: make.trim() || null,
-                model: model.trim() || null,
+                make: make.length > 0 ? make : null,
+                model: model.length > 0 ? model : null,
                 min_year: minYear > YEAR_MIN ? minYear : null,
                 max_mileage: maxMileage < MILEAGE_MAX ? maxMileage : null,
                 max_price: maxPrice < PRICE_MAX ? maxPrice : null,
+                notification_grouping: notificationGrouping,
             })
             .select()
             .single();
@@ -494,38 +604,20 @@ export default function Home() {
                 <section className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
                     <form onSubmit={handleSearch} className="space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label
-                                    htmlFor="make"
-                                    className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
-                                >
-                                    Make
-                                </label>
-                                <input
-                                    id="make"
-                                    type="text"
-                                    placeholder="e.g. Toyota"
-                                    value={make}
-                                    onChange={(e) => setMake(e.target.value)}
-                                    className={`w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition ${inputTextClass}`}
-                                />
-                            </div>
-                            <div>
-                                <label
-                                    htmlFor="model"
-                                    className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
-                                >
-                                    Model
-                                </label>
-                                <input
-                                    id="model"
-                                    type="text"
-                                    placeholder="e.g. Tacoma"
-                                    value={model}
-                                    onChange={(e) => setModel(e.target.value)}
-                                    className={`w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition ${inputTextClass}`}
-                                />
-                            </div>
+                            <MultiSelectDropdown
+                                id="make"
+                                label="Make"
+                                options={availableMakes}
+                                selected={make}
+                                onChange={setMake}
+                            />
+                            <MultiSelectDropdown
+                                id="model"
+                                label="Model"
+                                options={availableModels}
+                                selected={model}
+                                onChange={setModel}
+                            />
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -705,6 +797,22 @@ export default function Home() {
                                         Log out
                                     </button>
                                 </div>
+                            </div>
+
+                            <div className="flex items-center gap-4 text-sm text-blue-900 mb-3">
+                                <span className="font-semibold">Group emails by:</span>
+                                {(["combined", "make", "model"] as const).map((option) => (
+                                    <label key={option} className="flex items-center gap-1 cursor-pointer capitalize">
+                                        <input
+                                            type="radio"
+                                            name="notificationGrouping"
+                                            value={option}
+                                            checked={notificationGrouping === option}
+                                            onChange={() => setNotificationGrouping(option)}
+                                        />
+                                        {option}
+                                    </label>
+                                ))}
                             </div>
 
                             <form

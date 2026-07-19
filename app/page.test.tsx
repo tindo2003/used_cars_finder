@@ -39,11 +39,12 @@ function makeListing(overrides: Record<string, unknown> = {}) {
 type SavedSearchPayload = {
     name: string | null;
     email: string;
-    make: string | null;
-    model: string | null;
+    make: string[] | null;
+    model: string[] | null;
     min_year: number | null;
     max_mileage: number | null;
     max_price: number | null;
+    notification_grouping: string;
 };
 
 // A logged-in test user with no email set, so page.tsx's "prefill the
@@ -56,6 +57,13 @@ const LOGGED_IN_USER_WITH_EMAIL = { id: "user-1", email: "owner@example.com" };
 
 function makeFakeSupabase({
     listingsResult = { data: [makeListing()], error: null },
+    // Backs the make/model multi-select options (a separate,
+    // unfiltered `select("make, model")` query) -- defaults to the
+    // same data as listingsResult so most tests don't need to think
+    // about it, but can be overridden independently for tests that
+    // need options to exist even when the (filtered) listingsResult is
+    // empty, e.g. testing "clear filters" from a no-results state.
+    filterOptionsResult = listingsResult,
     insertResult = { data: { id: "search-1" }, error: null },
     savedSearchesSelectResult = { data: [], error: null },
     deleteResult = { error: null },
@@ -71,6 +79,7 @@ function makeFakeSupabase({
     onFavoriteDelete,
 }: {
     listingsResult?: { data: unknown[]; error: unknown };
+    filterOptionsResult?: { data: unknown[]; error: unknown };
     insertResult?: { data?: unknown; error: unknown };
     savedSearchesSelectResult?: { data: unknown[]; error: unknown };
     deleteResult?: { error: unknown };
@@ -95,15 +104,24 @@ function makeFakeSupabase({
     }
 
     const listingsQuery = makeChainable(listingsResult, [
-        "select",
         "eq",
         "is",
         "order",
-        "ilike",
+        "or",
         "gte",
         "lte",
         "limit",
     ]);
+    const filterOptionsQuery = makeChainable(filterOptionsResult, ["eq"]);
+
+    // page.tsx issues two different `listings` queries: the main
+    // `select("*")` fetch (filtered, sorted, paginated) and a separate
+    // unfiltered `select("make, model")` fetch that populates the
+    // make/model multi-select options. Branch on the columns argument
+    // so each gets its own mock chain/result.
+    const listingsTable = {
+        select: vi.fn((columns: string) => (columns === "make, model" ? filterOptionsQuery : listingsQuery)),
+    };
 
     const savedSearchesTable = {
         insert: vi.fn((payload: SavedSearchPayload) => {
@@ -141,7 +159,7 @@ function makeFakeSupabase({
     };
 
     const from = vi.fn((table: string) => {
-        if (table === "listings") return listingsQuery;
+        if (table === "listings") return listingsTable;
         if (table === "saved_searches") return savedSearchesTable;
         if (table === "favorites") return favoritesTable;
         throw new Error(`Unexpected table: ${table}`);
@@ -214,20 +232,52 @@ describe("search filters", () => {
         expect(screen.getByRole("button", { name: "Clear filters and try again" })).toBeInTheDocument();
     });
 
-    it("lets the customer type a make and model and submit the search", async () => {
+    it("lets the customer pick makes/models from the multi-select and submit the search", async () => {
         const user = userEvent.setup();
-        const fake = makeFakeSupabase();
+        const fake = makeFakeSupabase({
+            listingsResult: {
+                data: [makeListing(), makeListing({ id: "listing-2", make: "Lexus", model: "ES" })],
+                error: null,
+            },
+        });
         setFakeSupabase(fake);
         render(<Home />);
         await screen.findByText("2022 Toyota Camry");
 
-        await user.type(screen.getByLabelText("Make"), "Lexus");
-        await user.type(screen.getByLabelText("Model"), "ES");
+        await user.click(screen.getByLabelText("Make"));
+        await user.click(screen.getByRole("checkbox", { name: "Lexus" }));
+        await user.click(screen.getByLabelText("Model"));
+        await user.click(screen.getByRole("checkbox", { name: "ES" }));
         await user.click(screen.getByRole("button", { name: "Search" }));
 
         await waitFor(() => {
-            expect(fake.listingsQuery.ilike).toHaveBeenCalledWith("make", "%Lexus%");
-            expect(fake.listingsQuery.ilike).toHaveBeenCalledWith("model", "%ES%");
+            expect(fake.listingsQuery.or).toHaveBeenCalledWith("make.ilike.Lexus");
+            expect(fake.listingsQuery.or).toHaveBeenCalledWith("model.ilike.ES");
+        });
+    });
+
+    it("matches any of several selected makes and models (AND across fields, OR within each)", async () => {
+        const user = userEvent.setup();
+        const fake = makeFakeSupabase({
+            listingsResult: {
+                data: [
+                    makeListing(),
+                    makeListing({ id: "listing-2", make: "Lexus", model: "ES" }),
+                    makeListing({ id: "listing-3", make: "Honda", model: "Civic" }),
+                ],
+                error: null,
+            },
+        });
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await user.click(screen.getByLabelText("Make"));
+        await user.click(screen.getByRole("checkbox", { name: "Toyota" }));
+        await user.click(screen.getByRole("checkbox", { name: "Lexus" }));
+
+        await waitFor(() => {
+            expect(fake.listingsQuery.or).toHaveBeenCalledWith("make.ilike.Toyota,make.ilike.Lexus");
         });
     });
 
@@ -246,16 +296,24 @@ describe("search filters", () => {
         });
     });
 
-    it("clicking clear filters resets make/model back to empty", async () => {
+    it("clicking clear filters resets the make selection back to 'All Makes'", async () => {
         const user = userEvent.setup();
-        setFakeSupabase(makeFakeSupabase({ listingsResult: { data: [], error: null } }));
+        setFakeSupabase(
+            makeFakeSupabase({
+                listingsResult: { data: [], error: null },
+                filterOptionsResult: { data: [makeListing()], error: null },
+            })
+        );
         render(<Home />);
         await screen.findByText("No vehicles found matching your criteria.");
 
-        await user.type(screen.getByLabelText("Make"), "Honda");
+        await user.click(screen.getByLabelText("Make"));
+        await user.click(screen.getByRole("checkbox", { name: "Toyota" }));
+        expect(screen.getByLabelText("Make")).toHaveTextContent("Toyota");
+
         await user.click(screen.getByRole("button", { name: "Clear filters and try again" }));
 
-        expect(screen.getByLabelText("Make")).toHaveValue("");
+        expect(screen.getByLabelText("Make")).toHaveTextContent("All Makes");
     });
 });
 
@@ -543,16 +601,40 @@ describe("save search", () => {
         render(<Home />);
         await screen.findByText("2022 Toyota Camry");
 
-        await user.type(screen.getByLabelText("Make"), "Honda");
-        await user.type(screen.getByPlaceholderText("Name this search (e.g. Lexus ES)"), "Honda watch");
+        await user.click(screen.getByLabelText("Make"));
+        await user.click(screen.getByRole("checkbox", { name: "Toyota" }));
+        await user.type(screen.getByPlaceholderText("Name this search (e.g. Lexus ES)"), "Toyota watch");
         await user.type(screen.getByPlaceholderText("Enter your email"), "buyer@example.com");
         await user.click(screen.getByRole("button", { name: "Save Search" }));
 
         expect(confirmSpy).not.toHaveBeenCalled();
         await waitFor(() => expect(fake.savedSearchesTable.insert).toHaveBeenCalled());
         const payload = fake.savedSearchesTable.insert.mock.calls[0][0];
-        expect(payload).toMatchObject({ make: "Honda", name: "Honda watch", email: "buyer@example.com" });
+        expect(payload).toMatchObject({
+            make: ["Toyota"],
+            name: "Toyota watch",
+            email: "buyer@example.com",
+            notification_grouping: "combined",
+        });
         confirmSpy.mockRestore();
+    });
+
+    it("includes the chosen notification_grouping in the saved-search payload", async () => {
+        const user = userEvent.setup();
+        const fake = makeFakeSupabase({ authUser: LOGGED_IN_USER });
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await user.click(screen.getByLabelText("Make"));
+        await user.click(screen.getByRole("checkbox", { name: "Toyota" }));
+        await user.type(screen.getByPlaceholderText("Enter your email"), "buyer@example.com");
+        await user.click(screen.getByRole("radio", { name: "make" }));
+        await user.click(screen.getByRole("button", { name: "Save Search" }));
+
+        await waitFor(() => expect(fake.savedSearchesTable.insert).toHaveBeenCalled());
+        const payload = fake.savedSearchesTable.insert.mock.calls[0][0];
+        expect(payload.notification_grouping).toBe("make");
     });
 
     it("shows a Saved! confirmation after a successful save", async () => {
@@ -561,7 +643,8 @@ describe("save search", () => {
         render(<Home />);
         await screen.findByText("2022 Toyota Camry");
 
-        await user.type(screen.getByLabelText("Make"), "Honda");
+        await user.click(screen.getByLabelText("Make"));
+        await user.click(screen.getByRole("checkbox", { name: "Toyota" }));
         await user.type(screen.getByPlaceholderText("Enter your email"), "buyer@example.com");
         await user.click(screen.getByRole("button", { name: "Save Search" }));
 
@@ -574,7 +657,8 @@ describe("save search", () => {
         render(<Home />);
         await screen.findByText("2022 Toyota Camry");
 
-        await user.type(screen.getByLabelText("Make"), "Honda");
+        await user.click(screen.getByLabelText("Make"));
+        await user.click(screen.getByRole("checkbox", { name: "Toyota" }));
         await user.type(screen.getByPlaceholderText("Enter your email"), "buyer@example.com");
         await user.click(screen.getByRole("button", { name: "Save Search" }));
 
@@ -598,8 +682,8 @@ describe("my saved searches", () => {
                     {
                         id: "search-1",
                         name: "Lexus ES",
-                        make: "Lexus",
-                        model: "ES",
+                        make: ["Lexus"],
+                        model: ["ES"],
                         min_year: 2018,
                         max_mileage: 60000,
                         max_price: 30000,
@@ -624,7 +708,7 @@ describe("my saved searches", () => {
             makeFakeSupabase({
                 authUser: LOGGED_IN_USER,
                 insertResult: {
-                    data: { id: "new-search", name: "Honda watch", make: "Honda", email: "buyer@example.com" },
+                    data: { id: "new-search", name: "Toyota watch", make: ["Toyota"], email: "buyer@example.com" },
                     error: null,
                 },
             })
@@ -632,12 +716,39 @@ describe("my saved searches", () => {
         render(<Home />);
         await screen.findByText("2022 Toyota Camry");
 
-        await user.type(screen.getByLabelText("Make"), "Honda");
-        await user.type(screen.getByPlaceholderText("Name this search (e.g. Lexus ES)"), "Honda watch");
+        await user.click(screen.getByLabelText("Make"));
+        await user.click(screen.getByRole("checkbox", { name: "Toyota" }));
+        await user.type(screen.getByPlaceholderText("Name this search (e.g. Lexus ES)"), "Toyota watch");
         await user.type(screen.getByPlaceholderText("Enter your email"), "buyer@example.com");
         await user.click(screen.getByRole("button", { name: "Save Search" }));
 
-        expect(await screen.findByText("Honda watch")).toBeInTheDocument();
+        expect(await screen.findByText("Toyota watch")).toBeInTheDocument();
+    });
+
+    it("shows multiple makes/models joined together, with a grouping annotation when set", async () => {
+        setFakeSupabase(
+            makeFakeSupabase({
+                authUser: LOGGED_IN_USER,
+                savedSearchesSelectResult: {
+                    data: [
+                        {
+                            id: "search-2",
+                            name: "Toyota or Lexus",
+                            make: ["Toyota", "Lexus"],
+                            model: null,
+                            email: "buyer@example.com",
+                            notification_grouping: "make",
+                        },
+                    ],
+                    error: null,
+                },
+            })
+        );
+
+        render(<Home />);
+
+        expect(await screen.findByText("Toyota or Lexus")).toBeInTheDocument();
+        expect(screen.getByText(/Toyota, Lexus \(grouped by make\)/)).toBeInTheDocument();
     });
 
     it("deletes a saved search from Supabase and removes it from the list", async () => {
