@@ -1,4 +1,6 @@
 import argparse
+import os
+import sys
 
 from db import get_supabase
 from deals import update_deal_scores
@@ -44,3 +46,12 @@ if __name__ == "__main__":
 
     sent = notify_matches(supabase, top_n=args.top_n)
     print(f"Sent {sent} notification email(s).")
+
+    # Same fix as main.py: the real Supabase client leaves the process
+    # hanging indefinitely after all work is done (confirmed live on ECS
+    # Fargate), likely a non-daemon thread from its realtime/websockets
+    # dependency that CPython waits on before it will exit on its own.
+    # On a schedule that means indefinitely-billed Fargate time, so
+    # force the exit rather than trust a clean shutdown.
+    sys.stdout.flush()
+    os._exit(0)

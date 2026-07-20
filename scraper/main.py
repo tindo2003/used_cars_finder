@@ -1,4 +1,6 @@
 import argparse
+import os
+import sys
 import time
 from typing import Optional
 
@@ -112,3 +114,17 @@ if __name__ == "__main__":
         max_pages=args.max_pages,
         log_interval_minutes=args.log_interval,
     )
+
+    # A real (non-dry-run) run leaves the process hanging indefinitely
+    # after this point -- confirmed live on the first real ECS Fargate
+    # run: "Done." logged, then no further output, task stuck RUNNING
+    # until manually stopped. --dry-run never exercises get_supabase(),
+    # so this was never caught locally. Something the real Supabase
+    # client pulls in (its realtime/websockets dependency is the prime
+    # suspect) keeps a non-daemon thread alive, and CPython waits for
+    # every non-daemon thread before it will actually exit -- sys.exit()
+    # alone doesn't override that. On a schedule, an indefinitely-hanging
+    # task means indefinitely-billed Fargate time, so force the exit
+    # rather than trust the interpreter to shut down on its own.
+    sys.stdout.flush()
+    os._exit(0)
