@@ -14,6 +14,23 @@ Moves the scraper + notify cron jobs off GitHub Actions onto ECS Fargate (schedu
 
 No NAT Gateway (tasks only need outbound internet, run in public subnets with a public IP instead -- see `networking.tf`'s comment for why that's fine here).
 
+## What each file does
+
+| File | What's in it |
+|---|---|
+| `versions.tf` | Terraform/provider version constraints, the AWS provider block (region comes from `var.aws_region`), and two data sources (`aws_caller_identity`, `aws_region`) used elsewhere to build ARNs without hardcoding the account ID. |
+| `variables.tf` | Every input variable this config takes -- region, project name, GitHub repo/branch (for the OIDC trust policy), the 3 secrets, the alert email, and the two schedule cron expressions. No defaults for anything secret; those must come from `terraform.tfvars` or `TF_VAR_*`. |
+| `networking.tf` | Looks up the account's default VPC and its subnets (data sources, doesn't create a VPC), and creates the one security group the Fargate tasks run in -- egress-only, no inbound rule at all, since nothing ever needs to reach these tasks. |
+| `ecr.tf` | The 2 ECR repositories (`scraper`, `frontend`) and a shared lifecycle policy that expires anything past the most recent 10 images, so the registry doesn't grow forever. |
+| `secrets.tf` | The 3 Secrets Manager secrets (`SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `RESEND_API_KEY`) and their values, sourced from the corresponding Terraform variables. |
+| `iam.tf` | Every IAM role in this setup: the ECS task execution role (pulls images, writes logs, reads the 3 secrets), the EventBridge Scheduler execution role (can only `RunTask` on this cluster's two task families), the GitHub Actions OIDC provider + role (so CI never needs stored AWS keys), and the App Runner ECR-access role. Also defines the `local.scrape_task_def_family_arn` / `local.notify_task_def_family_arn` helpers (family-only ARNs, no revision) that `scheduler.tf` and this file's own policies both reference. |
+| `ecs.tf` | The ECS cluster itself, 2 CloudWatch log groups, and the 2 task definitions (`scrape` runs `main.py`, `notify` runs `notify.py` -- same image, different `command`). Has a `lifecycle { ignore_changes = [container_definitions] }` on both, since CI re-registers new revisions directly after this initial `apply`, not Terraform. |
+| `scheduler.tf` | The 2 EventBridge Scheduler schedules (cron expressions come from `variables.tf`) that actually trigger `RunTask` on a schedule -- this is what replaces `scraper.yml`/`notify.yml`'s GitHub Actions cron. |
+| `apprunner.tf` | The App Runner service for the frontend -- pulls from the frontend ECR repo, auto-deploys on new `:latest` pushes. Deliberately doesn't set any runtime env vars here (see the comment in the file for why `NEXT_PUBLIC_*` has to be a Docker build arg instead). |
+| `monitoring.tf` | The failure-alert path: an SNS topic + email subscription, and an EventBridge rule that fires on any `ECS Task State Change` event where a container exited non-zero, routed to that SNS topic. |
+| `outputs.tf` | The values printed after `apply`/`terraform output` -- both ECR repo URLs, the ECS cluster name, the App Runner URL, and the GitHub Actions role ARN (the one value you paste into the GitHub repo's variables). |
+| `terraform.tfvars.example` | Template for the real `terraform.tfvars` (gitignored) -- copy it and fill in real values; never commit the filled-in file. |
+
 ## Bootstrap order (first-time setup)
 
 This has a chicken-and-egg step: the ECS task definitions and the App Runner service both reference a `:latest` image tag that doesn't exist until CI has pushed at least once. The two behave differently when it doesn't exist yet (confirmed on the real first deploy, see the log below): **ECS task definitions register fine regardless** (AWS doesn't validate the image at registration time -- the scheduled task just fails at *run* time until an image exists), but **`aws_apprunner_service` actually tries to pull and run the image synchronously as part of creating the service**, so `terraform apply` hard-fails with `CREATE_FAILED` if the frontend image doesn't exist in ECR yet. Push the images (step 4 below) before expecting `apply` to fully succeed, or just re-run `terraform apply` (or `terraform apply -replace=aws_apprunner_service.frontend` if it's already stuck in `CREATE_FAILED`) once the image exists.
