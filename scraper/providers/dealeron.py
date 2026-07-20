@@ -165,8 +165,15 @@ def scrape(base_url: str, options: Optional[ScrapeOptions] = None) -> List[Dict[
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
 
-        # 1. Navigate to the page
-        page.goto(f"{base_url.rstrip('/')}/searchused.aspx", wait_until="networkidle")
+        # 1. Navigate to the page. "networkidle" can hang past Playwright's
+        # default 30s timeout on sites running chat widgets/trackers that
+        # poll continuously and never let the network go idle (the same
+        # issue dealerinspire.py and dealersocket_gemini.py already hit
+        # and fixed the same way -- confirmed live: chevroletoffremont.com
+        # crashed an entire scheduled run this way, since nothing caught
+        # the exception). wait_for_selector below actively waits for real
+        # content instead of trusting network activity to settle.
+        page.goto(f"{base_url.rstrip('/')}/searchused.aspx", wait_until="domcontentloaded")
 
         # 2. PROBE: Find the container
         possible_containers = [
@@ -177,11 +184,13 @@ def scrape(base_url: str, options: Optional[ScrapeOptions] = None) -> List[Dict[
         inventory_selector = None
 
         for selector in possible_containers:
-            if page.query_selector(selector):
+            try:
+                page.wait_for_selector(selector, timeout=15000)
                 inventory_selector = selector
-                page.wait_for_selector(inventory_selector)
                 print(f"Detected inventory container: {inventory_selector}")
                 break
+            except Exception:
+                continue
 
         if not inventory_selector:
             print(f"Inventory container not found at {base_url}. Aborting.")

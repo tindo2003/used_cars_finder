@@ -158,6 +158,34 @@ def test_run_dealer_scrapes_skips_dealers_with_an_unknown_platform(capsys):
     assert "Unknown platform" in capsys.readouterr().out
 
 
+def test_run_dealer_scrapes_continues_after_one_dealer_raises(capsys):
+    # Real production crash: an unhandled Page.goto timeout on one dealer
+    # took out the entire run, so every dealer after it silently never
+    # got scraped.
+    def failing_scrape(url, options):
+        raise TimeoutError("Page.goto: Timeout 30000ms exceeded.")
+
+    def working_scrape(url, options):
+        return [{"make": "Honda"}]
+
+    dealers = [
+        {"url": "https://broken.example.com", "platform": "dealeron", "name": "Broken Dealer"},
+        {"url": "https://ok.example.com", "platform": "dealerinspire", "name": "OK Dealer"},
+    ]
+    runner, db_client = make_runner(
+        dealers=dealers,
+        dealer_scrapers={"dealeron": failing_scrape, "dealerinspire": working_scrape},
+    )
+    progress = make_progress()
+
+    runner.run_dealer_scrapes(dry_run=False, progress=progress, log_interval_seconds=60)
+
+    assert len(db_client.calls) == 1
+    assert db_client.calls[0]["cars"] == [{"make": "Honda"}]
+    assert progress["dealer_errors"] == 1
+    assert "Broken Dealer" in capsys.readouterr().out
+
+
 def test_run_dealer_scrapes_uses_the_injected_sleep_fn_instead_of_real_sleep():
     sleep_calls = []
     dealers = [{"url": "https://example.com", "platform": "dealeron"}]

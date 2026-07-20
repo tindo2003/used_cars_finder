@@ -84,8 +84,17 @@ class ScrapeRunner:
                 city=dealer.get("city"),
                 dealer_name=dealer.get("name"),
             )
-            cars_found = scraper_func(dealer["url"], options)
-            self.db_client.bulk_save(cars_found, dry_run, progress, log_interval_seconds)
+            # One dealer's site being slow/down/bot-walling us must not
+            # take out every dealer after it for the rest of this run --
+            # confirmed live: an unhandled Page.goto timeout on a single
+            # dealer crashed an entire scheduled scrape, so every other
+            # dealer in the list silently never got scraped that run.
+            try:
+                cars_found = scraper_func(dealer["url"], options)
+                self.db_client.bulk_save(cars_found, dry_run, progress, log_interval_seconds)
+            except Exception as e:
+                print(f"Skipping {dealer.get('name') or dealer['url']} due to scrape error: {e}")
+                progress["dealer_errors"] = progress.get("dealer_errors", 0) + 1
 
     def run(
         self,

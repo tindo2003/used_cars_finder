@@ -54,7 +54,7 @@ def run_scraper(dry_run: bool = False, max_pages: Optional[int] = None, log_inte
 
     # Progress is logged at most once per log_interval_minutes instead of
     # once per saved listing, to keep GitHub Actions logs readable.
-    progress = {"saved": 0, "inserted": 0, "updated": 0, "invalid": 0, "last_log": time.monotonic()}
+    progress = {"saved": 0, "inserted": 0, "updated": 0, "invalid": 0, "dealer_errors": 0, "last_log": time.monotonic()}
     log_interval_seconds = log_interval_minutes * 60
 
     print(f"Fetching saved searches... {'(DRY RUN MODE)' if dry_run else ''}")
@@ -81,7 +81,8 @@ def run_scraper(dry_run: bool = False, max_pages: Optional[int] = None, log_inte
     print(
         f"Done. Processed {progress['saved']} listings this run: "
         f"{progress['inserted']} new, {progress['updated']} already existed (re-confirmed), "
-        f"{progress['invalid']} invalid (failed validation)."
+        f"{progress['invalid']} invalid (failed validation), "
+        f"{progress['dealer_errors']} dealer(s) skipped due to scrape errors."
     )
 
 
