@@ -44,3 +44,11 @@ next-env.d.ts
 
 # scraper data exports
 listings_rows.csv
+
+# terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/.terraform.lock.hcl
+terraform/terraform.tfvars
+terraform/*.auto.tfvars

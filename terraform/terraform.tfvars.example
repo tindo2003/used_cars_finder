@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars and fill in -- terraform.tfvars is gitignored,
+# never commit real secrets here. For CI/remote use, prefer passing these
+# via TF_VAR_* environment variables or a remote backend's variable store
+# instead of a checked-in file.
+
+aws_region    = "us-west-2"
+project_name  = "used-cars-finder"
+github_repo   = "your-github-username/used_cars_finder"
+github_branch = "main"
+
+supabase_url         = "https://xxxxxxxxxxxx.supabase.co"
+supabase_secret_key  = "paste-the-service-role-key-here"
+resend_api_key       = "paste-the-resend-api-key-here"
+
+alert_email = "you@example.com"

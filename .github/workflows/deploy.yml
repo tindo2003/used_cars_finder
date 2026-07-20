@@ -1,0 +1,113 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scraper/**"
+      - "app/**"
+      - "utils/**"
+      - "middleware.ts"
+      - "next.config.ts"
+      - "package.json"
+      - "package-lock.json"
+      - "Dockerfile"
+  workflow_dispatch:
+
+permissions:
+  id-token: write # required for OIDC -- no long-lived AWS keys in secrets
+  contents: read
+
+env:
+  AWS_REGION: us-west-2
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      scraper: ${{ steps.filter.outputs.scraper }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            scraper:
+              - 'scraper/**'
+            frontend:
+              - 'app/**'
+              - 'utils/**'
+              - 'middleware.ts'
+              - 'next.config.ts'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'Dockerfile'
+
+  deploy-scraper:
+    needs: changes
+    if: needs.changes.outputs.scraper == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+
+      - name: Build and push scraper image
+        working-directory: scraper
+        env:
+          REPO: ${{ steps.ecr-login.outputs.registry }}/used-cars-finder-scraper
+        run: |
+          docker build -t "$REPO:${{ github.sha }}" -t "$REPO:latest" .
+          docker push "$REPO:${{ github.sha }}"
+          docker push "$REPO:latest"
+
+      - name: Register new task definition revisions
+        env:
+          REPO: ${{ steps.ecr-login.outputs.registry }}/used-cars-finder-scraper
+        run: |
+          for family in used-cars-finder-scrape used-cars-finder-notify; do
+            aws ecs describe-task-definition --task-definition "$family" --query 'taskDefinition' \
+              | jq --arg IMAGE "$REPO:${{ github.sha }}" \
+                '.containerDefinitions[0].image = $IMAGE
+                 | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+              > task-def.json
+            aws ecs register-task-definition --cli-input-json file://task-def.json
+          done
+          # EventBridge Scheduler targets the family (no revision), so the
+          # very next scheduled run picks this up automatically -- no
+          # further deploy step needed.
+
+  deploy-frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+
+      - name: Build and push frontend image
+        env:
+          REPO: ${{ steps.ecr-login.outputs.registry }}/used-cars-finder-frontend
+        run: |
+          docker build \
+            --build-arg NEXT_PUBLIC_SUPABASE_URL="${{ vars.NEXT_PUBLIC_SUPABASE_URL }}" \
+            --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}" \
+            -t "$REPO:${{ github.sha }}" -t "$REPO:latest" .
+          docker push "$REPO:${{ github.sha }}"
+          docker push "$REPO:latest"
+          # App Runner's auto_deployments_enabled picks up the new
+          # :latest push on its own -- no explicit deploy call needed.

@@ -1,5 +1,8 @@
 requests
 beautifulsoup4
 supabase
-playwright
+# Pinned: the Docker image (see Dockerfile) bakes in browser binaries for
+# a specific Playwright release -- an unpinned pip install could resolve a
+# newer version than the image's browsers support.
+playwright==1.61.0
 pydantic
