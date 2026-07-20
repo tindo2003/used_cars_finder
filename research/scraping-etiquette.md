@@ -12,6 +12,8 @@ Audited 2026-07-18 to reduce IP-ban risk and confirm the scraper is behaving wel
 
 **DealerInspire sites — `Crawl-delay: 1`.** Confirmed on capitolhonda.com and capitolford.com. `/used-vehicles/` isn't disallowed. Our existing 2s wait between pages already satisfies this.
 
+**dealersocket-gemini sites — no `Crawl-delay`, but explicitly names AI-crawler user agents.** Confirmed identical robots.txt template on all 3 dealers on this platform (Acura of Fremont, Winn Kia of Fremont, Winn Volkswagen), added 2026-07-19. Groups `ClaudeBot`, `claude-web`, and `anthropic-ai` alongside Googlebot/Bingbot/GPTBot/PerplexityBot etc. under one rule set — worth flagging given who's doing the requesting here, though the actual rule (`Disallow: /inventory*,*`) only blocks comma-containing faceted-filter URLs (e.g. multi-value filter combinations), not the plain `/inventory/used[?page=N]` path `dealersocket_gemini.py` requests, which is separately `Allow`-listed (`Allow: /*?page=*`). No `Crawl-delay` specified; the provider uses a flat 2s wait between pages, matching DealerInspire's already-compliant cadence, since there's no stated minimum to honor.
+
 ## Fixes applied
 
 - `dealeron.py`: bumped the wait after each "Next" click from 2s to 10s to honor `Crawl-delay: 10`.

@@ -2,7 +2,7 @@ import argparse
 import time
 from typing import Optional
 
-from providers import craigslist, dealeron, dealerinspire
+from providers import craigslist, dealeron, dealerinspire, dealersocket_gemini
 from db import get_supabase, DbClient
 from models import SavedSearch
 from runner import ScrapeRunner
@@ -23,11 +23,17 @@ DEALERS = [
     {"url": "https://www.chevroletoffremont.com", "platform": "dealeron", "city": "Fremont", "name": "Fremont Chevrolet"},
     {"url": "https://www.fremonthyundai.com", "platform": "dealeron", "city": "Fremont", "name": "Fremont Hyundai"},
     {"url": "https://www.fremontcdjr.com", "platform": "dealerinspire", "city": "Newark", "name": "Fremont Chrysler Dodge Jeep Ram"},
+    {"url": "https://www.premiernissanoffremont.com", "platform": "dealeron", "city": "Fremont", "name": "Premier Nissan of Fremont"},
+    {"url": "https://www.fremontbuickgmc.com", "platform": "dealeron", "city": "Fremont", "name": "Fremont Buick GMC"},
+    {"url": "https://www.acuraoffremont.com", "platform": "dealersocket-gemini", "city": "Fremont", "name": "Acura of Fremont"},
+    {"url": "https://www.winnkiaoffremont.com", "platform": "dealersocket-gemini", "city": "Newark", "name": "Winn Kia of Fremont"},
+    {"url": "https://www.winnvw.com", "platform": "dealersocket-gemini", "city": "Newark", "name": "Winn Volkswagen"},
 ]
 
 DEALER_SCRAPERS = {
     "dealeron": dealeron.scrape,
     "dealerinspire": dealerinspire.scrape,
+    "dealersocket-gemini": dealersocket_gemini.scrape,
 }
 
 # eBay is intentionally excluded: its robots.txt explicitly disallows this

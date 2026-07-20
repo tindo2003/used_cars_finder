@@ -6,6 +6,14 @@ Updated 2026-07-18: `scraper/main.py` now scrapes 10 dealers — the original 2 
 
 Updated 2026-07-20: added an 11th dealer, Lexus Stevens Creek (DealerOn, San Jose) — same auto group as Stevens Creek Toyota, confirmed via a direct `dealeron.scrape()` call (max_pages=1) returning correctly parsed make/model/year/price/mileage/VIN before being added to `DEALERS`.
 
+Updated 2026-07-19: expanded the Fremont candidate pool via web search — 6 new unverified entries (Premier Nissan of Fremont, Premier Subaru of Fremont, Fremont Mazda, Fremont Buick GMC, Winn Kia of Fremont, Winn Volkswagen). Two of the six (Fremont Mazda, Winn Kia/Winn Volkswagen) are technically in Newark, CA, same as the already-live Fremont CDJR — kept under the Fremont heading since they're part of the same metro cluster and marketed as serving Fremont. Note: a search hit for "Fremont Volkswagen Casper" is a same-named but unrelated dealer group in Casper, WY — not a Bay Area candidate, excluded.
+
+Updated 2026-07-19 (platform-verification pass): all 6 candidates above checked — 2 confirmed `dealeron` (Premier Nissan of Fremont, Fremont Buick GMC), verified live via direct `dealeron.scrape()` calls (63 and 44 vehicles respectively, correct make/model/year/price/mileage/VIN) and **added to `DEALERS`**. The other 4 split across two platforms with no provider built yet: Premier Subaru of Fremont + Fremont Mazda are `dealerdotcom` (Akamai-fronted — same `ddc_diag_akam` diagnostic cookie prefix on both, 403s a bare `curl`; a real provider would need the same kind of bot-protection handling `dealerinspire.py` already needed for Capitol Honda); Winn Kia of Fremont + Winn Volkswagen are `dealersocket-gemini` (same platform already flagged unbuilt for Acura of Fremont — `secureoffersites.com`/`websitegemini`, and notably 406s a plain `curl` request until a real browser-like `Accept` header is sent, which is a header-negotiation quirk, not an actual bot wall).
+
+Updated 2026-07-19 (`dealersocket-gemini` provider built): [scraper/providers/dealersocket_gemini.py](../scraper/providers/dealersocket_gemini.py) added, unlocking Winn Kia of Fremont, Winn Volkswagen, and Acura of Fremont — all 3 verified live (64 vehicles each, correct make/model/trim/year/price/mileage/VIN) and **added to `DEALERS`** (now 16 dealers total). This platform exposes make/model as a single free-text title (e.g. "2003 Honda CR-V LX FWD") with no per-field data attributes — the real per-field breakdown lives in each card's `data-itemid` attribute instead (`Make-Model-Trim-VIN`, hyphen-joined), which is genuinely ambiguous to split naively since both Make (e.g. "Mercedes-Benz") and Model (e.g. "CR-V", "Q4 e-tron") can themselves contain hyphens — `parse_item_id()` pops VIN/Trim off the end first (always reliable) and checks a small known hyphenated-make set before assuming the remainder's first segment alone is the Make; 12 unit tests cover this including both hyphen-ambiguity cases. No mileage issue here (present via a `details-item-row` label/value list, unlike title/data attributes) but transmission/fuel type are absent from the card entirely, same tradeoff `dealerinspire.py` already made. Also hit the identical `networkidle`-hangs-on-chat-widgets issue `dealerinspire.py` fixed (confirmed live on Acura of Fremont specifically) — fixed the same way (`domcontentloaded` + explicit `wait_for_selector`). Pagination is simpler than DealerOn/DealerInspire here: real `?page=N` query-param links, so the provider reads the max page number directly off the first page's pagination list and navigates by URL instead of clicking. Robots.txt (identical template across all 3 confirmed sites) explicitly lists AI-crawler user agents including `ClaudeBot`/`claude-web`/`anthropic-ai` alongside search engines, but its one `Disallow` rule (`/inventory*,*`) only blocks comma-containing faceted-filter URLs, not the plain `/inventory/used[?page=N]` path this provider actually requests — worth knowing given who's doing the requesting here, but not a blocker.
+
+Remaining unbuilt: `dealerdotcom` (Premier Subaru of Fremont, Fremont Mazda, Honda of Stevens Creek, Stevens Creek BMW) — Akamai-fronted, likely the harder of the two remaining platforms to build given the bot-wall.
+
 While verifying, found `dealerinspire.py`'s `page.goto(..., wait_until="networkidle")` timed out on several of these sites (capitolford.com, capitolhyundaisj.com, stevenscreekhyundai.com, sunnyvalehonda.com, fremontcdjr.com) even though they loaded fine in a real browser — some DealerInspire sites run chat widgets/trackers that poll continuously and never let the network go idle. Changed to `wait_until="domcontentloaded"`, since the provider already has an explicit `wait_for_selector(".result-wrap")` right after to confirm real content loaded.
 
 A URL here is **not yet confirmed scrapeable** just by being listed — each site needs its platform identified and (as Capitol Honda showed) a bot-protection check before writing/reusing a provider for it. Update the "Platform" column as each dealer gets verified; strike through ones that turn out unscrapeable (closed, custom site, hard bot-wall, etc).
@@ -20,7 +28,7 @@ A URL here is **not yet confirmed scrapeable** just by being listed — each sit
 | `dealerinspire` | `dealerinspire.com` / `dealerteamwork.com` scripts, Cloudflare-gated | [scraper/providers/dealerinspire.py](../scraper/providers/dealerinspire.py) |
 | `dealerdotcom` | Cox Automotive Dealer.com — `images.dealer.com`, `pictures.dealer.com`, `/static/ws/inv-listing/` bundle | not built yet |
 | `dealereprocess` (DEP) | `cdn.dealereprocess.org` | not built yet |
-| `dealersocket-gemini` | `secureoffersites.com`, `_website_gemini` body class | not built yet |
+| `dealersocket-gemini` | `secureoffersites.com`, `_website_gemini` body class | [scraper/providers/dealersocket_gemini.py](../scraper/providers/dealersocket_gemini.py) |
 
 **Detection method:** load the site, inspect `script[src]` and `link[href]` for the vendor's CDN domain.
 
@@ -57,10 +65,16 @@ A URL here is **not yet confirmed scrapeable** just by being listed — each sit
 |---|---|---|
 | Fremont Auto Mall (Audi/BMW/Honda/Lexus/Mercedes/Porsche hub) | thefremontautomall.com | dealereprocess (DEP) |
 | Fremont Toyota | fremonttoyota.com | dealereprocess (DEP) |
-| Acura of Fremont | acuraoffremont.com | dealersocket-gemini |
+| Acura of Fremont | acuraoffremont.com | dealersocket-gemini (confirmed, 64 vehicles via live `dealersocket_gemini.scrape()` test, **live in DEALERS**) |
 | Fremont Chevrolet | chevroletoffremont.com | dealeron (confirmed, **live in DEALERS**) |
 | Fremont Hyundai (DGDG-owned) | fremonthyundai.com | dealeron (confirmed — uses .aspx pages like Stevens Creek Toyota, **live in DEALERS**) |
 | Fremont Chrysler Dodge Jeep Ram (DGDG-owned, technically Newark CA) | fremontcdjr.com | dealerinspire (confirmed, **live in DEALERS**) |
+| Premier Nissan of Fremont | premiernissanoffremont.com | dealeron (confirmed via `cdn.dlron.us`/`dealeron.js` signature + live `dealeron.scrape()` test — 63 vehicles correctly parsed, Crawl-delay: 10, **live in DEALERS**) |
+| Premier Subaru of Fremont | premiersubaruoffremont.com | dealerdotcom (confirmed — Akamai-fronted, `ddc_diag_akam` diagnostic cookie prefix; 403s a plain `curl`, needs the bot-protection check DealerInspire sites needed) |
+| Fremont Mazda (technically Newark CA, same pattern as Fremont CDJR) | fremontmazda.com | dealerdotcom (confirmed — same Akamai/`ddc_diag_akam` signature and identical robots.txt bot-blocklist as Premier Subaru of Fremont, same platform) |
+| Fremont Buick GMC | fremontbuickgmc.com | dealeron (confirmed via `cdn.dlron.us`/`dealeron.js` signature + live `dealeron.scrape()` test — 44 vehicles correctly parsed, Crawl-delay: 10, **live in DEALERS**) |
+| Winn Kia of Fremont (technically Newark CA) | winnkiaoffremont.com | dealersocket-gemini (confirmed, 64 vehicles via live `dealersocket_gemini.scrape()` test, **live in DEALERS**) |
+| Winn Volkswagen (technically Newark CA, serves Fremont) | winnvw.com | dealersocket-gemini (confirmed, 64 vehicles via live `dealersocket_gemini.scrape()` test, **live in DEALERS**) |
 
 ## Palo Alto
 | Dealer | URL | Platform |
