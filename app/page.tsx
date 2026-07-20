@@ -50,20 +50,32 @@ function getSellerLabel(car: any) {
 // listing is still up (see scraper/db.py) -- surfacing it as "Updated
 // X ago" tells the customer how fresh/likely-still-available a listing
 // is, without needing to explain the underlying mechanism.
-function formatLastSeen(lastSeenAt: unknown): string | null {
-    if (typeof lastSeenAt !== "string") return null;
-    const seenDate = new Date(lastSeenAt);
-    if (Number.isNaN(seenDate.getTime())) return null;
+//
+// Second-level granularity (unlike the old minutes-only version) so the
+// monitoring widget's "last crawl" stat can read like a live tick
+// ("18 seconds ago") rather than jumping straight to "just now".
+function formatRelativeTime(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
 
-    const diffMinutes = Math.round((Date.now() - seenDate.getTime()) / 60000);
-    if (diffMinutes < 1) return "Updated just now";
-    if (diffMinutes < 60) return `Updated ${diffMinutes} minute${diffMinutes === 1 ? "" : "s"} ago`;
+    const diffSeconds = Math.round((Date.now() - date.getTime()) / 1000);
+    if (diffSeconds < 10) return "just now";
+    if (diffSeconds < 60) return `${diffSeconds} seconds ago`;
+
+    const diffMinutes = Math.round(diffSeconds / 60);
+    if (diffMinutes < 60) return `${diffMinutes} minute${diffMinutes === 1 ? "" : "s"} ago`;
 
     const diffHours = Math.round(diffMinutes / 60);
-    if (diffHours < 24) return `Updated ${diffHours} hour${diffHours === 1 ? "" : "s"} ago`;
+    if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`;
 
     const diffDays = Math.round(diffHours / 24);
-    return `Updated ${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
+    return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
+}
+
+function formatLastSeen(lastSeenAt: unknown): string | null {
+    const relative = formatRelativeTime(lastSeenAt);
+    return relative ? `Updated ${relative}` : null;
 }
 
 // deal_score/is_good_deal are computed server-side (scraper/deals.py,
@@ -197,6 +209,96 @@ function MultiSelectDropdown({
                 </div>
             )}
         </div>
+    );
+}
+
+// A "just for fun" live status widget -- one query for every active,
+// non-duplicate listing's id/created_at/last_seen_at/source columns,
+// with the stats derived from it client-side (same dedup-from-raw-rows
+// pattern the make/model/transmission filter options already use).
+// Deliberately a single lightweight query rather than 4 separate ones
+// (counts + distinct sources) to keep this simple to reason about and
+// simple to test. Polls every 30s for new data, and ticks every 1s on
+// top of that so "last crawl" reads like a live clock between polls.
+function MonitoringStats({ supabase }: { supabase: ReturnType<typeof createClient> }) {
+    const [stats, setStats] = useState<{
+        sourceCount: number;
+        activeListings: number;
+        newToday: number;
+        lastCrawl: string | null;
+    } | null>(null);
+    const [, setTick] = useState(0);
+
+    const fetchStats = useCallback(async () => {
+        const { data, error: fetchError } = await supabase
+            .from("listings")
+            .select("id, created_at, last_seen_at, dealer_name, marketplace_source")
+            .eq("status", "active")
+            .is("duplicate_of", null);
+
+        if (!fetchError && data) {
+            const rows = data as any[];
+            const startOfToday = new Date();
+            startOfToday.setHours(0, 0, 0, 0);
+
+            const sourceSet = new Set(
+                rows.map((row) => row.dealer_name || row.marketplace_source).filter(Boolean)
+            );
+            const newToday = rows.filter(
+                (row) => row.created_at && new Date(row.created_at) >= startOfToday
+            ).length;
+            const lastCrawl = rows.reduce<string | null>((latest, row) => {
+                if (!row.last_seen_at) return latest;
+                if (!latest || new Date(row.last_seen_at) > new Date(latest)) return row.last_seen_at;
+                return latest;
+            }, null);
+
+            setStats({
+                sourceCount: sourceSet.size,
+                activeListings: rows.length,
+                newToday,
+                lastCrawl,
+            });
+        }
+    }, [supabase]);
+
+    useEffect(() => {
+        fetchStats();
+        const poll = setInterval(fetchStats, 30000);
+        return () => clearInterval(poll);
+    }, [fetchStats]);
+
+    useEffect(() => {
+        const tick = setInterval(() => setTick((t) => t + 1), 1000);
+        return () => clearInterval(tick);
+    }, []);
+
+    if (!stats || stats.activeListings === 0) return null;
+
+    return (
+        <section className="bg-slate-900 text-white p-5 rounded-2xl shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+                Currently monitoring
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                    <p className="text-2xl font-extrabold">{stats.sourceCount}</p>
+                    <p className="text-xs text-slate-400">source{stats.sourceCount === 1 ? "" : "s"}</p>
+                </div>
+                <div>
+                    <p className="text-2xl font-extrabold">{stats.activeListings.toLocaleString()}</p>
+                    <p className="text-xs text-slate-400">active listings</p>
+                </div>
+                <div>
+                    <p className="text-2xl font-extrabold">{stats.newToday.toLocaleString()}</p>
+                    <p className="text-xs text-slate-400">new today</p>
+                </div>
+                <div>
+                    <p className="text-2xl font-extrabold">{formatRelativeTime(stats.lastCrawl) ?? "—"}</p>
+                    <p className="text-xs text-slate-400">last crawl</p>
+                </div>
+            </div>
+        </section>
     );
 }
 
@@ -841,6 +943,8 @@ export default function Home() {
                         marketplaces.
                     </p>
                 </header>
+
+                <MonitoringStats supabase={supabase} />
 
                 {/* Search & Filter Card */}
                 <section className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Home from "./page";
 
@@ -79,6 +79,11 @@ function makeFakeSupabase({
     // listingsResult (the initial page, .range(0, ...)) so tests can
     // assert a second batch actually gets appended, not re-fetched.
     loadMoreResult = { data: [] as unknown[], error: null },
+    // Backs the MonitoringStats widget's single stats query (id/
+    // created_at/last_seen_at/dealer_name/marketplace_source columns).
+    // Defaults to empty so the widget quietly renders nothing unless a
+    // test opts in.
+    statsResult = { data: [] as unknown[], error: null },
     insertResult = { data: { id: "search-1" }, error: null },
     updateResult = { data: null as unknown, error: null as unknown },
     savedSearchesSelectResult = { data: [], error: null },
@@ -98,6 +103,7 @@ function makeFakeSupabase({
     listingsResult?: { data: unknown[]; error: unknown };
     filterOptionsResult?: { data: unknown[]; error: unknown };
     loadMoreResult?: { data: unknown[]; error: unknown };
+    statsResult?: { data: unknown[]; error: unknown };
     insertResult?: { data?: unknown; error: unknown };
     updateResult?: { data?: unknown; error: unknown };
     savedSearchesSelectResult?: { data: unknown[]; error: unknown };
@@ -133,14 +139,18 @@ function makeFakeSupabase({
         return listingsQuery;
     });
     const filterOptionsQuery = makeChainable(filterOptionsResult, ["eq"]);
+    const statsQuery = makeChainable(statsResult, ["eq", "is"]);
 
-    // page.tsx issues two different `listings` queries: the main
-    // `select("*")` fetch (filtered, sorted, paginated) and a separate
+    // page.tsx issues three different `listings` queries: the main
+    // `select("*")` fetch (filtered, sorted, paginated), a separate
     // unfiltered fetch of just filter-option columns (make/model/
-    // transmission/seller_type). Branch on the columns argument so each
-    // gets its own mock chain/result.
+    // transmission/seller_type), and MonitoringStats' own stats
+    // columns. Branch on the columns argument so each gets its own mock
+    // chain/result.
     const listingsTable = {
-        select: vi.fn((columns: string) => (columns === "*" ? listingsQuery : filterOptionsQuery)),
+        select: vi.fn((columns: string) =>
+            columns === "*" ? listingsQuery : columns.startsWith("id,") ? statsQuery : filterOptionsQuery
+        ),
     };
 
     const savedSearchesTable = {
@@ -228,6 +238,65 @@ function makeFakeSupabase({
 
 beforeEach(() => {
     setFakeSupabase(makeFakeSupabase());
+});
+
+describe("monitoring stats", () => {
+    it("shows source count, active listings, new today, and last crawl", async () => {
+        const now = Date.now();
+        const todayMorning = new Date();
+        todayMorning.setHours(1, 0, 0, 0);
+        const threeDaysAgo = new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString();
+
+        setFakeSupabase(
+            makeFakeSupabase({
+                statsResult: {
+                    data: [
+                        {
+                            id: "1",
+                            created_at: todayMorning.toISOString(),
+                            last_seen_at: new Date(now - 5000).toISOString(),
+                            dealer_name: "Capitol Honda",
+                            marketplace_source: "dealerinspire",
+                        },
+                        {
+                            id: "2",
+                            created_at: threeDaysAgo,
+                            last_seen_at: new Date(now - 60000).toISOString(),
+                            dealer_name: "Capitol Honda",
+                            marketplace_source: "dealerinspire",
+                        },
+                        {
+                            id: "3",
+                            created_at: threeDaysAgo,
+                            last_seen_at: new Date(now - 120000).toISOString(),
+                            dealer_name: null,
+                            marketplace_source: "craigslist",
+                        },
+                    ],
+                    error: null,
+                },
+            })
+        );
+        render(<Home />);
+
+        const heading = await screen.findByText("Currently monitoring");
+        const widget = heading.closest("section") as HTMLElement;
+
+        // 2 distinct sources (Capitol Honda + craigslist), 3 active
+        // listings total, 1 of them created today.
+        expect(within(widget).getByText("2")).toBeInTheDocument();
+        expect(within(widget).getByText("3")).toBeInTheDocument();
+        expect(within(widget).getByText("1")).toBeInTheDocument();
+        expect(within(widget).getByText(/just now|seconds ago/)).toBeInTheDocument();
+    });
+
+    it("does not render when there are no active listings to report on", async () => {
+        setFakeSupabase(makeFakeSupabase({ statsResult: { data: [], error: null } }));
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        expect(screen.queryByText("Currently monitoring")).not.toBeInTheDocument();
+    });
 });
 
 describe("search filters", () => {
