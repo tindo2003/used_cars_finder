@@ -45,9 +45,9 @@ variable "alert_email" {
 }
 
 variable "scrape_schedule_expression" {
-  description = "EventBridge Scheduler cron for the scrape task -- mirrors scraper.yml's existing */15 cron"
+  description = "EventBridge Scheduler cron for the scrape task -- every 6 hours (changed 2026-07-20 from */15, which billed near-continuous Fargate time once the process-hang fix made real runs actually take their full ~14-30min duration every 15 minutes)"
   type        = string
-  default     = "cron(*/15 * * * ? *)"
+  default     = "cron(0 */6 * * ? *)"
 }
 
 variable "notify_schedule_expression" {
