@@ -10,6 +10,24 @@ const MILEAGE_MAX = 200000;
 const PRICE_MAX = 100000;
 const PAGE_SIZE = 50;
 
+// Dealer feeds store transmission as a highly specific, manufacturer-
+// worded string (e.g. "6-Speed Automatic ECT-i", "9-Speed 948TE
+// Automatic") rather than a clean Automatic/Manual split -- a customer
+// picking the literal "Automatic" option would miss almost all of them.
+// This sentinel value (never a real transmission string) offers one
+// quick "any of the automatic variants" bucket via a substring match,
+// without needing to enumerate every manufacturer-specific spelling.
+//
+// Deliberately literal, not semantic: only matches values containing
+// the word "automatic". CVT ("CVT Lineartronic", "eCVT", ...) and
+// dual-clutch transmissions ("PDK", "DCT", "DSG"-without-"Automatic")
+// are functionally no-clutch-pedal/automatic-like too, but a user call
+// (2026-07-20) was to keep this bucket strictly literal rather than
+// broadening it to cover them -- a shopper wanting a CVT/dual-clutch
+// car picks its exact raw value instead.
+const ANY_AUTOMATIC_VALUE = "__any_automatic__";
+const isAutomaticTransmission = (value: string) => value.toLowerCase().includes("automatic");
+
 const inputTextClass = "text-slate-900 placeholder:text-slate-400";
 
 // marketplace_source is an internal platform code (e.g. "dealerinspire",
@@ -81,6 +99,8 @@ function describeSavedSearch(search: any) {
     if (search.min_year) filters.push(`${search.min_year}+`);
     if (search.max_mileage) filters.push(`under ${search.max_mileage.toLocaleString()} mi`);
     if (search.max_price) filters.push(`under $${search.max_price.toLocaleString()}`);
+    if (search.transmission) filters.push(search.transmission === ANY_AUTOMATIC_VALUE ? "Any Automatic" : search.transmission);
+    if (search.seller_type) filters.push(search.seller_type);
 
     const description = filters.length > 0 ? `${vehicle} — ${filters.join(", ")}` : vehicle;
     const grouping =
@@ -140,14 +160,24 @@ function MultiSelectDropdown({
             </button>
             {open && (
                 <div className="absolute z-20 mt-1 w-full max-h-72 overflow-y-auto bg-white border border-slate-300 rounded-lg shadow-lg p-2 space-y-1">
-                    <input
-                        type="text"
-                        value={query}
-                        onChange={(e) => setQuery(e.target.value)}
-                        placeholder={`Search ${label.toLowerCase()}s...`}
-                        aria-label={`Search ${label}`}
-                        className={`w-full border border-slate-200 rounded p-2 mb-1 text-sm sticky top-0 bg-white ${inputTextClass}`}
-                    />
+                    <div className="sticky top-0 bg-white flex items-center gap-2 mb-1">
+                        <input
+                            type="text"
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                            placeholder={`Search ${label.toLowerCase()}s...`}
+                            aria-label={`Search ${label}`}
+                            className={`flex-1 border border-slate-200 rounded p-2 text-sm ${inputTextClass}`}
+                        />
+                        <button
+                            type="button"
+                            onClick={() => setOpen(false)}
+                            aria-label={`Close ${label}`}
+                            className="shrink-0 w-8 h-8 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+                        >
+                            ✕
+                        </button>
+                    </div>
                     {filteredOptions.length === 0 && (
                         <p className="text-sm text-slate-400 px-2 py-1">No matches</p>
                     )}
@@ -176,7 +206,11 @@ export default function Home() {
     // --- Filter State ---
     const [make, setMake] = useState<string[]>([]);
     const [model, setModel] = useState<string[]>([]);
-    const [makeModelPairs, setMakeModelPairs] = useState<{ make: string; model: string }[]>([]);
+    const [filterOptionRows, setFilterOptionRows] = useState<
+        { make: string; model: string; transmission: string | null; seller_type: string | null }[]
+    >([]);
+    const [transmission, setTransmission] = useState("");
+    const [sellerType, setSellerType] = useState("");
     const [minYear, setMinYear] = useState(YEAR_MIN);
     const [maxMileage, setMaxMileage] = useState(MILEAGE_MAX);
     const [maxPrice, setMaxPrice] = useState(PRICE_MAX);
@@ -264,12 +298,15 @@ export default function Home() {
         // "TOYOTA" both appear in production).
         if (make.length > 0) query = query.or(make.map((m) => `make.ilike.${m}`).join(","));
         if (model.length > 0) query = query.or(model.map((m) => `model.ilike.${m}`).join(","));
+        if (transmission === ANY_AUTOMATIC_VALUE) query = query.ilike("transmission", "%automatic%");
+        else if (transmission) query = query.ilike("transmission", transmission);
+        if (sellerType) query = query.ilike("seller_type", sellerType);
         if (minYear > YEAR_MIN) query = query.gte("model_year", minYear);
         if (maxMileage < MILEAGE_MAX) query = query.lte("mileage", maxMileage);
         if (maxPrice < PRICE_MAX) query = query.lte("price", maxPrice);
 
         return query;
-    }, [make, model, minYear, maxMileage, maxPrice, sortBy, supabase]);
+    }, [make, model, transmission, sellerType, minYear, maxMileage, maxPrice, sortBy, supabase]);
 
     const fetchListings = useCallback(async () => {
         setLoading(true);
@@ -324,14 +361,19 @@ export default function Home() {
     const fetchFilterOptions = useCallback(async () => {
         const { data, error: fetchError } = await supabase
             .from("listings")
-            .select("make, model")
+            .select("make, model, transmission, seller_type")
             .eq("status", "active");
 
         if (!fetchError && data) {
-            setMakeModelPairs(
+            setFilterOptionRows(
                 (data as any[])
                     .filter((row) => row.make && row.model)
-                    .map((row) => ({ make: row.make as string, model: row.model as string }))
+                    .map((row) => ({
+                        make: row.make as string,
+                        model: row.model as string,
+                        transmission: (row.transmission as string) || null,
+                        seller_type: (row.seller_type as string) || null,
+                    }))
             );
         }
     }, [supabase]);
@@ -341,8 +383,8 @@ export default function Home() {
     }, [fetchFilterOptions]);
 
     const availableMakes = useMemo(
-        () => dedupeCaseInsensitive(makeModelPairs.map((pair) => pair.make)),
-        [makeModelPairs]
+        () => dedupeCaseInsensitive(filterOptionRows.map((row) => row.make)),
+        [filterOptionRows]
     );
 
     // Only offer models that actually belong to one of the selected
@@ -350,12 +392,12 @@ export default function Home() {
     // No makes selected means no narrowing (every model is an option).
     const availableModels = useMemo(() => {
         const selectedMakes = new Set(make.map((m) => m.toLowerCase()));
-        const relevantPairs =
+        const relevantRows =
             selectedMakes.size > 0
-                ? makeModelPairs.filter((pair) => selectedMakes.has(pair.make.toLowerCase()))
-                : makeModelPairs;
-        return dedupeCaseInsensitive(relevantPairs.map((pair) => pair.model));
-    }, [makeModelPairs, make]);
+                ? filterOptionRows.filter((row) => selectedMakes.has(row.make.toLowerCase()))
+                : filterOptionRows;
+        return dedupeCaseInsensitive(relevantRows.map((row) => row.model));
+    }, [filterOptionRows, make]);
 
     // If narrowing (or changing) the make selection drops a previously
     // selected model out of the now-relevant list, drop it from the
@@ -368,6 +410,49 @@ export default function Home() {
             return next.length === prev.length ? prev : next;
         });
     }, [availableModels]);
+
+    // Transmission narrows to whatever's actually available for the
+    // selected make(s) AND model(s) -- picking "Toyota Camry" shouldn't
+    // leave a transmission in the list that no Camry in inventory has.
+    const availableTransmissions = useMemo(() => {
+        const selectedMakes = new Set(make.map((m) => m.toLowerCase()));
+        const selectedModels = new Set(model.map((m) => m.toLowerCase()));
+        const relevantRows = filterOptionRows.filter(
+            (row) =>
+                (selectedMakes.size === 0 || selectedMakes.has(row.make.toLowerCase())) &&
+                (selectedModels.size === 0 || selectedModels.has(row.model.toLowerCase()))
+        );
+        return dedupeCaseInsensitive(
+            relevantRows.map((row) => row.transmission).filter((t): t is string => Boolean(t))
+        );
+    }, [filterOptionRows, make, model]);
+
+    // If narrowing make/model drops the selected transmission out of the
+    // now-relevant list, clear it too, same reasoning as the model prune.
+    // "Any Automatic" stays valid as long as some automatic variant is
+    // still available, since it isn't itself one of the raw values.
+    useEffect(() => {
+        if (!transmission) return;
+        const stillValid =
+            transmission === ANY_AUTOMATIC_VALUE
+                ? availableTransmissions.some(isAutomaticTransmission)
+                : availableTransmissions.some((t) => t.toLowerCase() === transmission.toLowerCase());
+        if (!stillValid) setTransmission("");
+    }, [availableTransmissions, transmission]);
+
+    // seller_type is only ever "dealer" or unset in practice today
+    // (Craigslist/eBay don't expose an owner/dealer distinction at list
+    // level) -- built from real distinct values rather than a hardcoded
+    // guess so this never offers an option that can't match. Not
+    // narrowed by make/model (unlike transmission above) since it wasn't
+    // asked for and dealer-vs-private isn't a per-vehicle-model thing.
+    const availableSellerTypes = useMemo(
+        () =>
+            dedupeCaseInsensitive(
+                filterOptionRows.map((row) => row.seller_type).filter((s): s is string => Boolean(s))
+            ),
+        [filterOptionRows]
+    );
 
     const fetchMySavedSearches = useCallback(async () => {
         if (!user) {
@@ -417,6 +502,8 @@ export default function Home() {
     const handleClearFilters = () => {
         setMake([]);
         setModel([]);
+        setTransmission("");
+        setSellerType("");
         setMinYear(YEAR_MIN);
         setMaxMileage(MILEAGE_MAX);
         setMaxPrice(PRICE_MAX);
@@ -436,6 +523,8 @@ export default function Home() {
         const hasNoFilters =
             make.length === 0 &&
             model.length === 0 &&
+            !transmission &&
+            !sellerType &&
             minYear === YEAR_MIN &&
             maxMileage === MILEAGE_MAX &&
             maxPrice === PRICE_MAX;
@@ -455,6 +544,8 @@ export default function Home() {
             email: email.trim(),
             make: make.length > 0 ? make : null,
             model: model.length > 0 ? model : null,
+            transmission: transmission || null,
+            seller_type: sellerType || null,
             min_year: minYear > YEAR_MIN ? minYear : null,
             max_mileage: maxMileage < MILEAGE_MAX ? maxMileage : null,
             max_price: maxPrice < PRICE_MAX ? maxPrice : null,
@@ -498,6 +589,8 @@ export default function Home() {
         setEmail(search.email || "");
         setMake(search.make || []);
         setModel(search.model || []);
+        setTransmission(search.transmission || "");
+        setSellerType(search.seller_type || "");
         setMinYear(search.min_year || YEAR_MIN);
         setMaxMileage(search.max_mileage || MILEAGE_MAX);
         setMaxPrice(search.max_price || PRICE_MAX);
@@ -767,6 +860,54 @@ export default function Home() {
                                 selected={model}
                                 onChange={setModel}
                             />
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label
+                                    htmlFor="transmission"
+                                    className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
+                                >
+                                    Transmission
+                                </label>
+                                <select
+                                    id="transmission"
+                                    value={transmission}
+                                    onChange={(e) => setTransmission(e.target.value)}
+                                    className={`w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition ${inputTextClass}`}
+                                >
+                                    <option value="">Any Transmission</option>
+                                    {availableTransmissions.some(isAutomaticTransmission) && (
+                                        <option value={ANY_AUTOMATIC_VALUE}>Any Automatic</option>
+                                    )}
+                                    {availableTransmissions.map((option) => (
+                                        <option key={option} value={option}>
+                                            {option}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label
+                                    htmlFor="sellerType"
+                                    className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
+                                >
+                                    Seller Type
+                                </label>
+                                <select
+                                    id="sellerType"
+                                    value={sellerType}
+                                    onChange={(e) => setSellerType(e.target.value)}
+                                    className={`w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition ${inputTextClass}`}
+                                >
+                                    <option value="">Any Seller Type</option>
+                                    {availableSellerTypes.map((option) => (
+                                        <option key={option} value={option}>
+                                            {option}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

@@ -123,7 +123,7 @@ function makeFakeSupabase({
         return chain;
     }
 
-    const listingsQuery = makeChainable(listingsResult, ["eq", "is", "order", "or", "gte", "lte", "limit"]);
+    const listingsQuery = makeChainable(listingsResult, ["eq", "is", "order", "or", "ilike", "gte", "lte", "limit"]);
     // .range()'s resolved value depends on its args (the initial fetch
     // is .range(0, ...); "Load More" is .range(<current count>, ...))
     // rather than being a fixed chainable method, so it needs its own
@@ -136,11 +136,11 @@ function makeFakeSupabase({
 
     // page.tsx issues two different `listings` queries: the main
     // `select("*")` fetch (filtered, sorted, paginated) and a separate
-    // unfiltered `select("make, model")` fetch that populates the
-    // make/model multi-select options. Branch on the columns argument
-    // so each gets its own mock chain/result.
+    // unfiltered fetch of just filter-option columns (make/model/
+    // transmission/seller_type). Branch on the columns argument so each
+    // gets its own mock chain/result.
     const listingsTable = {
-        select: vi.fn((columns: string) => (columns === "make, model" ? filterOptionsQuery : listingsQuery)),
+        select: vi.fn((columns: string) => (columns === "*" ? listingsQuery : filterOptionsQuery)),
     };
 
     const savedSearchesTable = {
@@ -282,6 +282,146 @@ describe("search filters", () => {
             expect(fake.listingsQuery.or).toHaveBeenCalledWith("make.ilike.Lexus");
             expect(fake.listingsQuery.or).toHaveBeenCalledWith("model.ilike.ES");
         });
+    });
+
+    it("lets the customer filter by transmission and seller type", async () => {
+        const user = userEvent.setup();
+        const fake = makeFakeSupabase({
+            listingsResult: {
+                data: [
+                    makeListing({ transmission: "Automatic", seller_type: "dealer" }),
+                    makeListing({
+                        id: "listing-2",
+                        make: "Honda",
+                        model: "Civic",
+                        transmission: "Manual",
+                        seller_type: null,
+                    }),
+                ],
+                error: null,
+            },
+        });
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await user.selectOptions(screen.getByLabelText("Transmission"), "Manual");
+        await user.selectOptions(screen.getByLabelText("Seller Type"), "dealer");
+
+        await waitFor(() => {
+            expect(fake.listingsQuery.ilike).toHaveBeenCalledWith("transmission", "Manual");
+            expect(fake.listingsQuery.ilike).toHaveBeenCalledWith("seller_type", "dealer");
+        });
+    });
+
+    it("lets the customer pick 'Any Automatic' to match every automatic variant at once", async () => {
+        const user = userEvent.setup();
+        const fake = makeFakeSupabase({
+            filterOptionsResult: {
+                data: [
+                    { make: "Toyota", model: "Camry", transmission: "6-Speed Automatic ECT-i", seller_type: "dealer" },
+                    { make: "Honda", model: "Civic", transmission: "Manual", seller_type: null },
+                ],
+                error: null,
+            },
+        });
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        expect(screen.getByRole("option", { name: "Any Automatic" })).toBeInTheDocument();
+
+        await user.selectOptions(screen.getByLabelText("Transmission"), "Any Automatic");
+
+        await waitFor(() => {
+            expect(fake.listingsQuery.ilike).toHaveBeenCalledWith("transmission", "%automatic%");
+        });
+    });
+
+    it("hides 'Any Automatic' when no automatic variant is available", async () => {
+        setFakeSupabase(
+            makeFakeSupabase({
+                filterOptionsResult: {
+                    data: [{ make: "Honda", model: "Civic", transmission: "Manual", seller_type: null }],
+                    error: null,
+                },
+            })
+        );
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        expect(screen.queryByRole("option", { name: "Any Automatic" })).not.toBeInTheDocument();
+    });
+
+    it("only offers transmission/seller-type options that actually appear in listings", async () => {
+        setFakeSupabase(
+            makeFakeSupabase({
+                filterOptionsResult: {
+                    data: [
+                        { make: "Toyota", model: "Camry", transmission: "Automatic", seller_type: "dealer" },
+                        { make: "Honda", model: "Civic", transmission: "Manual", seller_type: null },
+                    ],
+                    error: null,
+                },
+            })
+        );
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        expect(screen.getByRole("option", { name: "Automatic" })).toBeInTheDocument();
+        expect(screen.getByRole("option", { name: "Manual" })).toBeInTheDocument();
+        expect(screen.getByRole("option", { name: "dealer" })).toBeInTheDocument();
+        expect(screen.queryByRole("option", { name: "private" })).not.toBeInTheDocument();
+    });
+
+    it("scopes the Transmission options to the selected make and model", async () => {
+        const user = userEvent.setup();
+        setFakeSupabase(
+            makeFakeSupabase({
+                filterOptionsResult: {
+                    data: [
+                        { make: "Toyota", model: "Camry", transmission: "Automatic", seller_type: "dealer" },
+                        { make: "Toyota", model: "Corolla", transmission: "CVT", seller_type: "dealer" },
+                        { make: "Honda", model: "Civic", transmission: "Manual", seller_type: null },
+                    ],
+                    error: null,
+                },
+            })
+        );
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        // Before picking a make, every transmission is available.
+        expect(screen.getByRole("option", { name: "Automatic" })).toBeInTheDocument();
+        expect(screen.getByRole("option", { name: "CVT" })).toBeInTheDocument();
+        expect(screen.getByRole("option", { name: "Manual" })).toBeInTheDocument();
+
+        await user.click(screen.getByLabelText("Make"));
+        await user.click(screen.getByRole("checkbox", { name: "Toyota" }));
+
+        expect(screen.getByRole("option", { name: "Automatic" })).toBeInTheDocument();
+        expect(screen.getByRole("option", { name: "CVT" })).toBeInTheDocument();
+        expect(screen.queryByRole("option", { name: "Manual" })).not.toBeInTheDocument();
+
+        await user.click(screen.getByLabelText("Model"));
+        await user.click(screen.getByRole("checkbox", { name: "Camry" }));
+
+        expect(screen.getByRole("option", { name: "Automatic" })).toBeInTheDocument();
+        expect(screen.queryByRole("option", { name: "CVT" })).not.toBeInTheDocument();
+    });
+
+    it("closes the make dropdown when the x button is clicked", async () => {
+        const user = userEvent.setup();
+        setFakeSupabase(makeFakeSupabase());
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await user.click(screen.getByLabelText("Make"));
+        expect(screen.getByRole("checkbox", { name: "Toyota" })).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Close Make" }));
+
+        expect(screen.queryByRole("checkbox", { name: "Toyota" })).not.toBeInTheDocument();
     });
 
     it("matches any of several selected makes and models (AND across fields, OR within each)", async () => {
