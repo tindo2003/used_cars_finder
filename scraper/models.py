@@ -52,6 +52,11 @@ class Listing(BaseModel):
     deal_score: Optional[float] = None
     is_good_deal: Optional[bool] = None
     duplicate_of: Optional[str] = None
+    # geometry(Point,4326) -- PostgREST returns geometry columns as EWKB hex
+    # text by default. Only ever checked for is None here (see geocoding.py),
+    # never parsed, so str is the right type -- same treatment as
+    # SavedSearch.target_location below.
+    location: Optional[str] = None
     last_seen_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
