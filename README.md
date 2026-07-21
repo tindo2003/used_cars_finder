@@ -10,6 +10,7 @@ Finds good used-car deals around the Bay Area. It pulls listings from local deal
 - Save a search and get a daily email digest of the best current matches, best deals first — you'll see the same listing again the next day if it's still a top match, not just the first time it shows up
 - Bookmark any listing as a favorite to revisit later
 - Listings that haven't shown up in a while quietly drop out, since they're probably already sold
+- Each listing's location is geocoded in the background — groundwork for an upcoming "search within X miles" filter, not yet exposed in search itself
 
 Sign in with an email/password — it's still built for one person, but signing in keeps your saved searches and favorites synced across devices.
 
