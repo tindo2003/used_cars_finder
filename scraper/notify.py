@@ -5,6 +5,7 @@ import sys
 from db import get_supabase
 from deals import update_deal_scores
 from duplicates import update_duplicate_flags
+from geocoding import geocode_listings
 from notifications import DEFAULT_TOP_N, notify_matches
 from staleness import DEFAULT_STALE_THRESHOLD_DAYS, expire_stale_listings
 
@@ -37,6 +38,12 @@ if __name__ == "__main__":
     # they all already filter on status="active".
     expired = expire_stale_listings(supabase, stale_threshold_days=args.stale_threshold_days)
     print(f"Expired {expired} listings not reconfirmed in over {args.stale_threshold_days} days.")
+
+    # Runs before duplicate detection so this run never spends a write
+    # geocoding a listing staleness just expired -- ordering is otherwise
+    # inconsequential, since nothing downstream reads location yet.
+    geocoded = geocode_listings(supabase)
+    print(f"Geocoded {geocoded} listings.")
 
     duplicates = update_duplicate_flags(supabase)
     print(f"Updated duplicate flags; {duplicates} listings flagged as cross-marketplace duplicates.")

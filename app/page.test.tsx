@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Home from "./page";
@@ -252,6 +252,16 @@ function makeFakeSupabase({
         throw new Error(`Unexpected table: ${table}`);
     });
 
+    // nearby_listings() (migrations/016) returns setof listings, so a
+    // radius search reuses the same chainable listingsQuery object a plain
+    // .from("listings").select("*") already uses -- identical .eq/.is/
+    // .order/.range support and the same range()-keyed initial-vs-load-more
+    // switching.
+    const rpc = vi.fn((fn: string, _params: Record<string, unknown>) => {
+        if (fn === "nearby_listings") return listingsQuery;
+        throw new Error(`Unexpected rpc: ${fn}`);
+    });
+
     // Mimics the real client closely enough for these tests: a
     // successful sign-in/sign-up fires the registered
     // onAuthStateChange listener with a session, just like the real
@@ -282,7 +292,7 @@ function makeFakeSupabase({
         }),
     };
 
-    return { from, auth, listingsQuery, savedSearchesTable, favoritesTable };
+    return { from, auth, rpc, listingsQuery, savedSearchesTable, favoritesTable };
 }
 
 beforeEach(() => {
@@ -1406,5 +1416,133 @@ describe("favorites", () => {
         await screen.findByText("2022 Toyota Camry");
 
         expect(screen.queryByText("My Favorites")).not.toBeInTheDocument();
+    });
+});
+
+describe("radius search", () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    async function openLocationFilter(user: ReturnType<typeof userEvent.setup>) {
+        await user.click(screen.getByRole("button", { name: /Location/ }));
+    }
+
+    it("resolves a valid zip and queries nearby_listings with the chosen radius", async () => {
+        const user = userEvent.setup();
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ lat: 37.3541, lng: -121.9552 }) }))
+        );
+        const fake = makeFakeSupabase();
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await openLocationFilter(user);
+        await user.type(screen.getByLabelText("Zip Code"), "95050");
+        await user.selectOptions(screen.getByLabelText("Search Radius"), "50");
+        await user.click(screen.getByRole("button", { name: "Search" }));
+
+        await waitFor(() => {
+            expect(global.fetch).toHaveBeenCalledWith("/api/geocode-zip?zip=95050");
+        });
+        await waitFor(() => {
+            expect(fake.rpc).toHaveBeenCalledWith("nearby_listings", {
+                center_lat: 37.3541,
+                center_lng: -121.9552,
+                radius_miles: 50,
+            });
+        });
+    });
+
+    it("shows an inline error and never hits the network for a malformed zip", async () => {
+        const user = userEvent.setup();
+        const fetchSpy = vi.fn();
+        vi.stubGlobal("fetch", fetchSpy);
+        setFakeSupabase(makeFakeSupabase());
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await openLocationFilter(user);
+        await user.type(screen.getByLabelText("Zip Code"), "abc");
+        await user.click(screen.getByRole("button", { name: "Search" }));
+
+        expect(await screen.findByText("Enter a 5-digit US zip code.")).toBeInTheDocument();
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it("shows the server's error and does not call nearby_listings when the zip can't be resolved", async () => {
+        const user = userEvent.setup();
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(() =>
+                Promise.resolve({ ok: false, json: () => Promise.resolve({ error: "Couldn't find zip code 00000." }) })
+            )
+        );
+        const fake = makeFakeSupabase();
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await openLocationFilter(user);
+        await user.type(screen.getByLabelText("Zip Code"), "00000");
+        await user.click(screen.getByRole("button", { name: "Search" }));
+
+        expect(await screen.findByText("Couldn't find zip code 00000.")).toBeInTheDocument();
+        expect(fake.rpc).not.toHaveBeenCalled();
+    });
+
+    it("reuses the resolved coordinates on Load More instead of re-resolving the zip", async () => {
+        const user = userEvent.setup();
+        const fetchSpy = vi.fn(() =>
+            Promise.resolve({ ok: true, json: () => Promise.resolve({ lat: 37.3541, lng: -121.9552 }) })
+        );
+        vi.stubGlobal("fetch", fetchSpy);
+        const fake = makeFakeSupabase({
+            listingsResult: { data: makeListings(50, "page1"), error: null },
+            loadMoreResult: { data: makeListings(3, "page2"), error: null },
+        });
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByRole("button", { name: "Load More" });
+
+        await openLocationFilter(user);
+        await user.type(screen.getByLabelText("Zip Code"), "95050");
+        await user.click(screen.getByRole("button", { name: "Search" }));
+        await waitFor(() => expect(fake.rpc).toHaveBeenCalled());
+
+        await user.click(screen.getByRole("button", { name: "Load More" }));
+
+        await waitFor(() => {
+            expect(fake.listingsQuery.range).toHaveBeenCalledWith(50, 99);
+        });
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("falls back to the plain listings query after the zip filter is cleared", async () => {
+        const user = userEvent.setup();
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ lat: 37.3541, lng: -121.9552 }) }))
+        );
+        const fake = makeFakeSupabase();
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await openLocationFilter(user);
+        const zipInput = screen.getByLabelText("Zip Code");
+        await user.type(zipInput, "95050");
+        await user.click(screen.getByRole("button", { name: "Search" }));
+        await waitFor(() => expect(fake.rpc).toHaveBeenCalledTimes(1));
+
+        await user.clear(zipInput);
+        await user.click(screen.getByRole("button", { name: "Search" }));
+
+        // No new rpc call once the filter is cleared -- the query falls
+        // back to the plain .from("listings") path.
+        await waitFor(() => expect(fake.from).toHaveBeenCalledWith("listings"));
+        expect(fake.rpc).toHaveBeenCalledTimes(1);
     });
 });

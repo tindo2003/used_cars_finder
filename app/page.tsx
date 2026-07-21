@@ -9,6 +9,8 @@ const YEAR_MAX = new Date().getFullYear();
 const MILEAGE_MAX = 200000;
 const PRICE_MAX = 100000;
 const PAGE_SIZE = 50;
+const RADIUS_OPTIONS = [10, 25, 50, 100] as const;
+const ZIP_REGEX = /^\d{5}$/;
 
 // Dealer feeds store transmission as a highly specific, manufacturer-
 // worded string (e.g. "6-Speed Automatic ECT-i", "9-Speed 948TE
@@ -341,6 +343,15 @@ export default function Home() {
     const [maxMileage, setMaxMileage] = useState(MILEAGE_MAX);
     const [maxPrice, setMaxPrice] = useState(PRICE_MAX);
     const [sortBy, setSortBy] = useState<(typeof SORT_OPTIONS)[number]["value"]>("best_deal");
+    const [zipCode, setZipCode] = useState("");
+    const [radiusMiles, setRadiusMiles] = useState<number>(25);
+    const [resolvedLocation, setResolvedLocation] = useState<{ zip: string; lat: number; lng: number } | null>(null);
+    const [locationError, setLocationError] = useState<string | null>(null);
+    const [resolvingLocation, setResolvingLocation] = useState(false);
+    // Collapsed by default -- unlike savedSearchesExpanded/favoritesExpanded
+    // (default true, since those reveal existing user data), this gates a
+    // brand-new optional filter with nothing to reveal yet.
+    const [locationFilterExpanded, setLocationFilterExpanded] = useState(false);
 
     // --- Data State ---
     const [listings, setListings] = useState<any[]>([]);
@@ -409,9 +420,19 @@ export default function Home() {
         // tiebreaker so ordering (and therefore pagination via
         // .range()) is fully deterministic even when both of the above
         // tie too.
-        let query = supabase
-            .from("listings")
-            .select("*")
+        // A radius filter switches the FROM to a spatial RPC instead of the
+        // plain table -- nearby_listings() returns setof listings (see
+        // migrations/016), so every filter below chains onto it exactly the
+        // same way it chains onto .from("listings").select("*").
+        let query = resolvedLocation
+            ? supabase.rpc("nearby_listings", {
+                  center_lat: resolvedLocation.lat,
+                  center_lng: resolvedLocation.lng,
+                  radius_miles: radiusMiles,
+              })
+            : supabase.from("listings").select("*");
+
+        query = query
             .eq("status", "active")
             .is("duplicate_of", null)
             .order(sortOption.column, { ascending: sortOption.ascending, nullsFirst: false })
@@ -432,7 +453,7 @@ export default function Home() {
         if (maxPrice < PRICE_MAX) query = query.lte("price", maxPrice);
 
         return query;
-    }, [make, model, transmission, sellerType, minYear, maxMileage, maxPrice, sortBy, supabase]);
+    }, [make, model, transmission, sellerType, minYear, maxMileage, maxPrice, sortBy, supabase, resolvedLocation, radiusMiles]);
 
     const fetchListings = useCallback(async () => {
         setLoading(true);
@@ -620,9 +641,46 @@ export default function Home() {
     }, [fetchMyFavorites]);
 
     // --- Handlers ---
-    const handleSearch = (e: React.FormEvent) => {
+    const handleSearch = async (e: React.FormEvent) => {
         e.preventDefault();
-        fetchListings();
+        const trimmedZip = zipCode.trim();
+
+        if (!trimmedZip) {
+            setLocationError(null);
+            setResolvedLocation(null);
+            return;
+        }
+        if (!ZIP_REGEX.test(trimmedZip)) {
+            setLocationError("Enter a 5-digit US zip code.");
+            return; // never hits the network
+        }
+        if (resolvedLocation?.zip === trimmedZip) return; // already resolved, nothing changed
+
+        setResolvingLocation(true);
+        setLocationError(null);
+        try {
+            const response = await fetch(`/api/geocode-zip?zip=${encodeURIComponent(trimmedZip)}`);
+            const body = await response.json();
+            if (!response.ok) {
+                setLocationError(body.error ?? "Couldn't find that zip code.");
+                setResolvedLocation(null);
+                return;
+            }
+            // Deliberately not calling fetchListings() here -- setting this
+            // state closes over the *old* value until the next render, so
+            // an immediate fetchListings() call would run with the stale
+            // (pre-update) resolvedLocation. buildListingsQuery depends on
+            // resolvedLocation, so the existing
+            // useEffect(() => fetchListings(), [fetchListings]) picks up
+            // this change and refetches on its own -- same mechanism every
+            // other filter (make, price, ...) already relies on.
+            setResolvedLocation({ zip: trimmedZip, lat: body.lat, lng: body.lng });
+        } catch {
+            setLocationError("Couldn't reach the location service. Try again.");
+            setResolvedLocation(null);
+        } finally {
+            setResolvingLocation(false);
+        }
     };
 
     const handleClearFilters = () => {
@@ -633,6 +691,10 @@ export default function Home() {
         setMinYear(YEAR_MIN);
         setMaxMileage(MILEAGE_MAX);
         setMaxPrice(PRICE_MAX);
+        setZipCode("");
+        setRadiusMiles(25);
+        setResolvedLocation(null);
+        setLocationError(null);
     };
 
     const handleSaveSearch = async (e: React.FormEvent) => {
@@ -1112,6 +1174,73 @@ export default function Home() {
                                     <span>${PRICE_MAX.toLocaleString()}</span>
                                 </div>
                             </div>
+                        </div>
+
+                        <div>
+                            <button
+                                type="button"
+                                onClick={() => setLocationFilterExpanded((prev) => !prev)}
+                                aria-expanded={locationFilterExpanded}
+                                className="w-full flex items-center justify-between text-left"
+                            >
+                                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                    Location
+                                </span>
+                                <span className="text-slate-400 text-sm font-medium whitespace-nowrap">
+                                    {locationFilterExpanded ? "Hide ▲" : "Show ▼"}
+                                </span>
+                            </button>
+                            {locationFilterExpanded && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                                    <div>
+                                        <label
+                                            htmlFor="zipCode"
+                                            className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
+                                        >
+                                            Zip Code
+                                        </label>
+                                        <input
+                                            id="zipCode"
+                                            type="text"
+                                            inputMode="numeric"
+                                            maxLength={5}
+                                            placeholder="e.g. 95050"
+                                            value={zipCode}
+                                            onChange={(e) => {
+                                                setZipCode(e.target.value);
+                                                setLocationError(null);
+                                            }}
+                                            className={`w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition ${inputTextClass}`}
+                                        />
+                                        {locationError && (
+                                            <p className="text-xs text-red-600 mt-1">{locationError}</p>
+                                        )}
+                                        {resolvingLocation && (
+                                            <p className="text-xs text-slate-400 mt-1">Resolving location…</p>
+                                        )}
+                                    </div>
+                                    <div>
+                                        <label
+                                            htmlFor="radiusMiles"
+                                            className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2"
+                                        >
+                                            Search Radius
+                                        </label>
+                                        <select
+                                            id="radiusMiles"
+                                            value={radiusMiles}
+                                            onChange={(e) => setRadiusMiles(Number(e.target.value))}
+                                            className={`w-full border border-slate-300 p-3 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition ${inputTextClass}`}
+                                        >
+                                            {RADIUS_OPTIONS.map((option) => (
+                                                <option key={option} value={option}>
+                                                    Within {option} miles
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         <div className="flex justify-end">
