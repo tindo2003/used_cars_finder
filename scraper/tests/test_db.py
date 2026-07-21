@@ -374,7 +374,14 @@ def test_bulk_save_throttles_progress_logging(capsys):
     supabase = FakeSupabase()
     db = DbClient(supabase)
     # last_log far enough in the past that the very first save should log.
-    progress = make_progress(last_log=0)
+    # time.monotonic()'s reference point is implementation-defined (often
+    # system uptime, not epoch-zero) -- a hardcoded 0 only reads as "long
+    # ago" on a machine that's been up a while, and silently stopped
+    # triggering the very first log at all on a freshly booted CI runner
+    # (real failure caught in CI, not reproducible on a long-uptime dev
+    # machine). Compute "far enough in the past" relative to the actual
+    # clock instead.
+    progress = make_progress(last_log=time.monotonic() - 10000)
     cars = [{"vin": f"VIN{i}"} for i in range(5)]
 
     db.bulk_save(cars, dry_run=False, progress=progress, log_interval_seconds=9999)
