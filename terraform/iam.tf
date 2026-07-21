@@ -118,7 +118,18 @@ resource "aws_iam_role" "github_actions" {
         StringLike = {
           # Restricted to pushes on one branch -- PRs and other branches
           # never get deploy credentials.
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:ref:refs/heads/${var.github_branch}"
+          #
+          # NOT the "classic" repo:owner/name:ref:... format the AWS/GitHub
+          # OIDC docs lead with -- this GitHub account issues sub claims
+          # with owner/repo *names* suffixed by their immutable numeric
+          # IDs (repo:owner@owner_id/name@repo_id:ref:...), confirmed via
+          # CloudTrail after every real deploy run failed with "Not
+          # authorized to perform sts:AssumeRoleWithWebIdentity" against
+          # the plain-name condition below (found 2026-07-20 -- every
+          # automated deploy had been silently failing since the initial
+          # AWS cutover as a result). IDs are stable for a given repo, but
+          # would need updating if the repo is ever transferred/recreated.
+          "token.actions.githubusercontent.com:sub" = "repo:tindo2003@62820303/used_cars_finder@1303686867:ref:refs/heads/${var.github_branch}"
         }
       }
     }]
