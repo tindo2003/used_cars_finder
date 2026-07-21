@@ -30,6 +30,7 @@ No NAT Gateway (tasks only need outbound internet, run in public subnets with a 
 | `monitoring.tf` | The failure-alert path: an SNS topic + email subscription, and an EventBridge rule that fires on any `ECS Task State Change` event where a container exited non-zero, routed to that SNS topic. |
 | `outputs.tf` | The values printed after `apply`/`terraform output` -- both ECR repo URLs, the ECS cluster name, the App Runner URL, and the GitHub Actions role ARN (the one value you paste into the GitHub repo's variables). |
 | `terraform.tfvars.example` | Template for the real `terraform.tfvars` (gitignored) -- copy it and fill in real values; never commit the filled-in file. |
+| `DEPLOY_PLAYBOOK.md` | Runbook for when `deploy.yml` fails -- known failure modes (a flaky CI-only test, the repo-variable-vs-secret mix-up, the OIDC sub-claim mismatch that silently broke every automated deploy until 2026-07-21), how to verify a deploy actually landed, and how to read the GitHub API without a token/`gh` CLI. |
 
 ## Bootstrap order (first-time setup)
 
