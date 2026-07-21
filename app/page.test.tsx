@@ -139,18 +139,67 @@ function makeFakeSupabase({
         return listingsQuery;
     });
     const filterOptionsQuery = makeChainable(filterOptionsResult, ["eq"]);
-    const statsQuery = makeChainable(statsResult, ["eq", "is"]);
 
-    // page.tsx issues three different `listings` queries: the main
+    // MonitoringStats no longer runs one query over full listing rows --
+    // it does 3 cheap aggregate queries (2 counts + an order/limit(1))
+    // plus one paginated-but-skinny-columns query for distinct sources.
+    // All 4 are derived here from the same statsResult.data fixture so
+    // existing tests don't need to know about the split.
+    const statsRows = (statsResult.data ?? []) as any[];
+    const startOfTodayForStats = new Date();
+    startOfTodayForStats.setHours(0, 0, 0, 0);
+    const newTodayCount = statsRows.filter(
+        (row) => row.created_at && new Date(row.created_at) >= startOfTodayForStats
+    ).length;
+    const lastCrawlRow = statsRows.reduce<any>((latest, row) => {
+        if (!row.last_seen_at) return latest;
+        if (!latest || new Date(row.last_seen_at) > new Date(latest.last_seen_at)) return row;
+        return latest;
+    }, null);
+
+    // A fresh chain per call (not a shared singleton) so the plain count
+    // and the .gte()-filtered "new today" count -- both built from the
+    // same activeFilter() factory in page.tsx -- don't collide.
+    function makeCountQuery(count: number): any {
+        const chain: any = {};
+        chain.eq = vi.fn(() => chain);
+        chain.is = vi.fn(() => chain);
+        chain.gte = vi.fn(() => makeCountQuery(newTodayCount));
+        chain.then = (resolve: (value: unknown) => void) => resolve({ count, error: statsResult.error });
+        return chain;
+    }
+
+    const lastCrawlQuery = makeChainable(
+        { data: lastCrawlRow ? [{ last_seen_at: lastCrawlRow.last_seen_at }] : [], error: statsResult.error },
+        ["eq", "is", "order", "limit"]
+    );
+
+    const sourceQuery = makeChainable(
+        {
+            data: statsRows.map((row) => ({
+                dealer_name: row.dealer_name,
+                marketplace_source: row.marketplace_source,
+            })),
+            error: statsResult.error,
+        },
+        ["eq", "is", "order"]
+    );
+    sourceQuery.range = vi.fn(() => sourceQuery);
+
+    // page.tsx issues several different `listings` queries: the main
     // `select("*")` fetch (filtered, sorted, paginated), a separate
     // unfiltered fetch of just filter-option columns (make/model/
-    // transmission/seller_type), and MonitoringStats' own stats
-    // columns. Branch on the columns argument so each gets its own mock
+    // transmission/seller_type), and MonitoringStats' own queries.
+    // Branch on the columns argument so each gets its own mock
     // chain/result.
     const listingsTable = {
-        select: vi.fn((columns: string) =>
-            columns === "*" ? listingsQuery : columns.startsWith("id,") ? statsQuery : filterOptionsQuery
-        ),
+        select: vi.fn((columns: string) => {
+            if (columns === "*") return listingsQuery;
+            if (columns === "id") return makeCountQuery(statsRows.length);
+            if (columns === "last_seen_at") return lastCrawlQuery;
+            if (columns === "dealer_name, marketplace_source") return sourceQuery;
+            return filterOptionsQuery;
+        }),
     };
 
     const savedSearchesTable = {

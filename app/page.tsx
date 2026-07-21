@@ -212,14 +212,14 @@ function MultiSelectDropdown({
     );
 }
 
-// A "just for fun" live status widget -- one query for every active,
-// non-duplicate listing's id/created_at/last_seen_at/source columns,
-// with the stats derived from it client-side (same dedup-from-raw-rows
-// pattern the make/model/transmission filter options already use).
-// Deliberately a single lightweight query rather than 4 separate ones
-// (counts + distinct sources) to keep this simple to reason about and
-// simple to test. Polls every 30s for new data, and ticks every 1s on
-// top of that so "last crawl" reads like a live clock between polls.
+// A "just for fun" live status widget. activeListings/newToday/lastCrawl
+// are each a cheap aggregate query (exact count or order+limit(1)) -- no
+// row data crosses the wire for those. sourceCount is the one stat
+// PostgREST can't compute as an aggregate (no SELECT DISTINCT), so it's
+// the only query that paginates through matching rows, and only fetches
+// the 2 columns it actually needs (see fetchDistinctSourceCount) rather
+// than pulling every active listing's full row on every 30s poll like
+// this used to.
 function MonitoringStats({ supabase }: { supabase: ReturnType<typeof createClient> }) {
     const [stats, setStats] = useState<{
         sourceCount: number;
@@ -229,38 +229,62 @@ function MonitoringStats({ supabase }: { supabase: ReturnType<typeof createClien
     } | null>(null);
     const [, setTick] = useState(0);
 
+    const fetchDistinctSourceCount = useCallback(async () => {
+        // PostgREST caps a single response at its default max-rows (1000),
+        // so this still needs to paginate to see every source -- but only
+        // 2 skinny columns per row, not the full stats row shape.
+        const pageSize = 1000;
+        const sourceSet = new Set<string>();
+        let from = 0;
+        while (true) {
+            const { data, error } = await supabase
+                .from("listings")
+                .select("dealer_name, marketplace_source")
+                .eq("status", "active")
+                .is("duplicate_of", null)
+                .order("id", { ascending: true })
+                .range(from, from + pageSize - 1);
+
+            if (error || !data) break;
+            for (const row of data as any[]) {
+                const source = row.dealer_name || row.marketplace_source;
+                if (source) sourceSet.add(source);
+            }
+            if (data.length < pageSize) break;
+            from += pageSize;
+        }
+        return sourceSet.size;
+    }, [supabase]);
+
     const fetchStats = useCallback(async () => {
-        const { data, error: fetchError } = await supabase
-            .from("listings")
-            .select("id, created_at, last_seen_at, dealer_name, marketplace_source")
-            .eq("status", "active")
-            .is("duplicate_of", null);
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
 
-        if (!fetchError && data) {
-            const rows = data as any[];
-            const startOfToday = new Date();
-            startOfToday.setHours(0, 0, 0, 0);
+        const activeFilter = () =>
+            supabase.from("listings").select("id", { count: "exact", head: true }).eq("status", "active").is("duplicate_of", null);
 
-            const sourceSet = new Set(
-                rows.map((row) => row.dealer_name || row.marketplace_source).filter(Boolean)
-            );
-            const newToday = rows.filter(
-                (row) => row.created_at && new Date(row.created_at) >= startOfToday
-            ).length;
-            const lastCrawl = rows.reduce<string | null>((latest, row) => {
-                if (!row.last_seen_at) return latest;
-                if (!latest || new Date(row.last_seen_at) > new Date(latest)) return row.last_seen_at;
-                return latest;
-            }, null);
+        const [activeResult, newTodayResult, lastCrawlResult, sourceCount] = await Promise.all([
+            activeFilter(),
+            activeFilter().gte("created_at", startOfToday.toISOString()),
+            supabase
+                .from("listings")
+                .select("last_seen_at")
+                .eq("status", "active")
+                .is("duplicate_of", null)
+                .order("last_seen_at", { ascending: false, nullsFirst: false })
+                .limit(1),
+            fetchDistinctSourceCount(),
+        ]);
 
+        if (!activeResult.error && !newTodayResult.error && !lastCrawlResult.error) {
             setStats({
-                sourceCount: sourceSet.size,
-                activeListings: rows.length,
-                newToday,
-                lastCrawl,
+                sourceCount,
+                activeListings: activeResult.count ?? 0,
+                newToday: newTodayResult.count ?? 0,
+                lastCrawl: lastCrawlResult.data?.[0]?.last_seen_at ?? null,
             });
         }
-    }, [supabase]);
+    }, [supabase, fetchDistinctSourceCount]);
 
     useEffect(() => {
         fetchStats();
