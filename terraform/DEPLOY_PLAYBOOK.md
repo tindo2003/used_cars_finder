@@ -42,6 +42,35 @@ No `gh` CLI or PAT is assumed to be available in an agent/CI-debugging session. 
 - Always check the actual HTTP status / response shape before parsing -- a rate-limited response is still valid JSON (`{"message": "API rate limit exceeded..."}`), so a naive `json.load(...)['status']` throws, and a bash loop that swallows that silently can spin forever printing nothing. Check for the `message`/`documentation_url` keys (or just check HTTP status via `-D -`) before assuming success.
 - Job logs and repo variables/secrets require authenticated access (`403 Must have admin rights` for logs, `401` for variables) even on a public repo -- you can't read those without the user pasting them from the UI.
 
+**Polling loops: don't capture-then-reinterpolate the JSON into a nested `python3 -c`.** A pattern like this looks reasonable but is fragile:
+
+```bash
+# BROKEN -- silently fails forever instead of erroring loudly
+RESP=$(curl -s "$URL")
+STATUS=$(echo "$RESP" | python3 -c "
+import json,sys
+try:
+    print(json.load(sys.stdin).get('status','error'))
+except Exception:
+    print('parse_error')
+")
+```
+
+Hit this twice in one session: real API responses (run objects, job lists) contain quotes, unicode, and other characters that break when a bash variable holding raw JSON gets re-embedded inside a heredoc-style `python3 -c "..."` string (worse with `'''$RESP'''`-style triple-quote interpolation -- any `'''` or backslash sequence already in the JSON corrupts the script). The broad `except Exception: print('parse_error')` swallows the real error instead of surfacing it, and if the poll loop's own logic treats `parse_error` as "still waiting," it spins **forever printing `parse_error`** even after the run actually finished -- burning the rate-limit budget on retries that can never succeed, and giving no signal that anything is wrong.
+
+**Fix: pipe `curl` straight into `python3 -c` and read from stdin -- never round-trip through a bash variable:**
+
+```bash
+# ROBUST -- JSON never gets re-interpolated as a shell string
+curl -s "$URL" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(d.get('status', 'error'))
+"
+```
+
+If you must inspect the value in bash afterward, redirect to a temp file instead of a variable (`curl -s "$URL" -o /tmp/resp.json`, then `python3 -c "..." < /tmp/resp.json`) -- still no shell re-interpolation of the JSON content. And regardless of which shape you use: if a poll loop ever logs the same unexplained status for more than 2-3 iterations, stop and run one `curl | python3` check directly rather than trusting the loop to self-correct.
+
 Useful read-only queries:
 ```bash
 # Recent runs of one workflow
