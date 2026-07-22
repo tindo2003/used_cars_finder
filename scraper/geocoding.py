@@ -16,12 +16,15 @@ free-text location field -- which also includes real garbage scraped as
 Every failure mode collapses to "leave location NULL", never a crash.
 """
 
+import math
 import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import requests
 
 from db import DbClient, read_listings
+
+EARTH_RADIUS_MILES = 3958.8
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 # Nominatim's usage policy requires a descriptive User-Agent identifying
@@ -113,3 +116,36 @@ def geocode_listings(
             print(f"⚠️  Failed to write location for listing {listing.id}: {error}")
 
     return updated
+
+
+def point_coordinates(point: Optional[Dict[str, Any]]) -> Optional[Tuple[float, float]]:
+    """
+    Extract (lat, lng) from a GeoJSON Point dict as PostgREST returns for a
+    geometry column (see models.py's Listing.location/SavedSearch.target_location).
+    GeoJSON orders coordinates [lng, lat] -- flipped here to match geocode()'s
+    (lat, lng) convention used elsewhere in this module. Returns None for
+    anything malformed/unexpected rather than raising, same defensive
+    posture as geocode() itself.
+    """
+    if not point or point.get("type") != "Point":
+        return None
+
+    coords = point.get("coordinates")
+    if not coords or len(coords) != 2:
+        return None
+
+    try:
+        lng, lat = coords
+        return float(lat), float(lng)
+    except (TypeError, ValueError):
+        return None
+
+
+def haversine_miles(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Great-circle distance between two points in miles."""
+    lat1_rad, lat2_rad = math.radians(lat1), math.radians(lat2)
+    delta_lat = math.radians(lat2 - lat1)
+    delta_lng = math.radians(lng2 - lng1)
+
+    a = math.sin(delta_lat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lng / 2) ** 2
+    return 2 * EARTH_RADIUS_MILES * math.asin(math.sqrt(a))

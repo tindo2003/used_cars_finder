@@ -715,7 +715,8 @@ export default function Home() {
             !sellerType &&
             minYear === YEAR_MIN &&
             maxMileage === MILEAGE_MAX &&
-            maxPrice === PRICE_MAX;
+            maxPrice === PRICE_MAX &&
+            !resolvedLocation;
 
         if (hasNoFilters) {
             const proceed = window.confirm(
@@ -738,6 +739,20 @@ export default function Home() {
             max_mileage: maxMileage < MILEAGE_MAX ? maxMileage : null,
             max_price: maxPrice < PRICE_MAX ? maxPrice : null,
             notification_grouping: notificationGrouping,
+            // Unlike every filter above, these keys are omitted entirely
+            // (not sent as null) when no location is resolved -- editing a
+            // saved search without touching the Location filter this
+            // session must not silently wipe out a radius it already had,
+            // since we can't repopulate the zip field on edit (no reverse
+            // geocoding) to know whether the user actually wants to clear
+            // it. Reuses the already-resolved coordinates from the live
+            // search filter -- no new geocoding call.
+            ...(resolvedLocation
+                ? {
+                      target_location: `SRID=4326;POINT(${resolvedLocation.lng} ${resolvedLocation.lat})`,
+                      search_radius_miles: radiusMiles,
+                  }
+                : {}),
         };
 
         const { data, error } = editingSearchId

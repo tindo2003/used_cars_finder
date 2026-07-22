@@ -23,7 +23,7 @@ every call site, not just the ones a human remembers to update by hand.
 """
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -52,11 +52,14 @@ class Listing(BaseModel):
     deal_score: Optional[float] = None
     is_good_deal: Optional[bool] = None
     duplicate_of: Optional[str] = None
-    # geometry(Point,4326) -- PostgREST returns geometry columns as EWKB hex
-    # text by default. Only ever checked for is None here (see geocoding.py),
-    # never parsed, so str is the right type -- same treatment as
-    # SavedSearch.target_location below.
-    location: Optional[str] = None
+    # geometry(Point,4326) -- confirmed live 2026-07-21 that this Supabase
+    # project's PostgREST actually serializes geometry columns as a GeoJSON
+    # dict ({"type": "Point", "coordinates": [lng, lat], "crs": {...}}), not
+    # EWKB hex text as originally assumed -- the wrong str assumption here
+    # crashed every real notify.py run once listings.location started
+    # getting populated (ValidationError, "Input should be a valid string").
+    # See geocoding.py's point_coordinates() for parsing this back to (lat, lng).
+    location: Optional[Dict[str, Any]] = None
     last_seen_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
@@ -77,6 +80,8 @@ class SavedSearch(BaseModel):
     transmission: Optional[str] = None
     seller_type: Optional[str] = None
     search_radius_miles: Optional[float] = None
-    target_location: Optional[str] = None
+    # Same GeoJSON-dict shape as Listing.location above, not str -- see
+    # that field's comment for why.
+    target_location: Optional[Dict[str, Any]] = None
     notification_grouping: Optional[str] = "combined"
     created_at: Optional[datetime] = None

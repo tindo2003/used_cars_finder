@@ -5,6 +5,7 @@ import requests
 
 from db import DbClient, read_listings
 from deals import ranking_key
+from geocoding import haversine_miles, point_coordinates
 from models import Listing, SavedSearch
 from utils.timestamps import format_relative_time
 
@@ -67,6 +68,17 @@ def matches(listing: Listing, search: SavedSearch) -> bool:
         and search.seller_type.lower() != listing.seller_type.lower()
     ):
         return False
+    if search.target_location is not None and search.search_radius_miles is not None:
+        search_coords = point_coordinates(search.target_location)
+        listing_coords = point_coordinates(listing.location)
+        # Same "missing data doesn't disqualify" convention as every filter
+        # above -- a listing that couldn't be geocoded (e.g. an
+        # ungeocodable Craigslist city, see geocoding.py) isn't excluded
+        # just because a radius filter happens to be set.
+        if search_coords and listing_coords:
+            distance = haversine_miles(*search_coords, *listing_coords)
+            if distance > search.search_radius_miles:
+                return False
     return True
 
 

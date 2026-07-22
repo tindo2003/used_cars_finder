@@ -1,6 +1,6 @@
 from typing import Any, List, Optional, Tuple
 
-from geocoding import geocode, geocode_listings
+from geocoding import geocode, geocode_listings, haversine_miles, point_coordinates
 from tests.fakes import FakeSupabase
 
 
@@ -95,9 +95,12 @@ def test_skips_a_listing_that_already_has_a_location():
         calls.append(query)
         return (0.0, 0.0)
 
-    supabase = FakeSupabase(
-        initial_data={"listings": [make_listing(location="SRID=4326;POINT(-121.8863 37.3382)")]}
-    )
+    # location is read back through Listing.model_validate() (via
+    # read_listings()), so this needs the real GeoJSON-dict shape
+    # PostgREST actually returns for a geometry column -- not the EWKT
+    # text geocode_listings() writes (see models.py's Listing.location).
+    already_geocoded = {"type": "Point", "coordinates": [-121.8863, 37.3382]}
+    supabase = FakeSupabase(initial_data={"listings": [make_listing(location=already_geocoded)]})
 
     updated = geocode_listings(supabase, geocode_fn=recording_geocode, sleep_fn=lambda seconds: None)
 
@@ -217,3 +220,47 @@ def test_only_geocodes_currently_active_listings():
 
     assert updated == 0
     assert supabase.table("listings").data[0]["location"] is None
+
+
+# --- point_coordinates() ---
+
+
+def test_point_coordinates_extracts_lat_lng_in_the_right_order():
+    # GeoJSON orders coordinates [lng, lat] -- point_coordinates() must
+    # flip these to match this module's (lat, lng) convention. This is
+    # the same class of order-swap bug as geocode_listings' EWKT writing.
+    point = {"type": "Point", "coordinates": [-121.8863, 37.3382]}
+
+    assert point_coordinates(point) == (37.3382, -121.8863)
+
+
+def test_point_coordinates_returns_none_for_none():
+    assert point_coordinates(None) is None
+
+
+def test_point_coordinates_returns_none_for_a_non_point_geometry():
+    assert point_coordinates({"type": "LineString", "coordinates": [[0, 0], [1, 1]]}) is None
+
+
+def test_point_coordinates_returns_none_for_malformed_coordinates():
+    assert point_coordinates({"type": "Point", "coordinates": [1.0]}) is None
+    assert point_coordinates({"type": "Point", "coordinates": ["not", "numbers"]}) is None
+    assert point_coordinates({"type": "Point"}) is None
+
+
+# --- haversine_miles() ---
+
+
+def test_haversine_miles_zero_distance_for_the_same_point():
+    assert haversine_miles(37.3382, -121.8863, 37.3382, -121.8863) == 0.0
+
+
+def test_haversine_miles_known_bay_area_distance():
+    # San Jose to Fremont, roughly 20 miles apart -- loose tolerance since
+    # this is a sanity check on the formula, not a precision requirement.
+    san_jose = (37.3382, -121.8863)
+    fremont = (37.5485, -121.9886)
+
+    distance = haversine_miles(*san_jose, *fremont)
+
+    assert 15 < distance < 25

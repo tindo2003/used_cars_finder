@@ -116,6 +116,40 @@ def test_matches_rejects_wrong_seller_type():
     assert matches(make_listing(seller_type="private"), make_search(seller_type="dealer")) is False
 
 
+SAN_JOSE = {"type": "Point", "coordinates": [-121.8863, 37.3382]}
+# ~20 miles from San Jose -- outside a 10mi radius, inside a 25mi one.
+FREMONT = {"type": "Point", "coordinates": [-121.9886, 37.5485]}
+
+
+def test_matches_accepts_listing_within_radius():
+    assert (
+        matches(make_listing(location=FREMONT), make_search(target_location=SAN_JOSE, search_radius_miles=25))
+        is True
+    )
+
+
+def test_matches_rejects_listing_outside_radius():
+    assert (
+        matches(make_listing(location=FREMONT), make_search(target_location=SAN_JOSE, search_radius_miles=10))
+        is False
+    )
+
+
+def test_matches_does_not_exclude_when_listing_has_no_location():
+    # Same "missing data doesn't disqualify" convention as every other
+    # filter -- an ungeocodable Craigslist listing (see geocoding.py)
+    # shouldn't be excluded just because a radius filter happens to be set.
+    assert matches(make_listing(), make_search(target_location=SAN_JOSE, search_radius_miles=10)) is True
+
+
+def test_matches_ignores_radius_when_search_has_no_target_location_set():
+    assert matches(make_listing(location=FREMONT), make_search(search_radius_miles=1)) is True
+
+
+def test_matches_ignores_radius_when_search_has_no_radius_set():
+    assert matches(make_listing(location=FREMONT), make_search(target_location=SAN_JOSE)) is True
+
+
 # --- _seller_label() ---
 
 

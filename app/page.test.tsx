@@ -981,6 +981,10 @@ describe("auth", () => {
 });
 
 describe("save search", () => {
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
     it("warns instead of saving when no email is entered", async () => {
         const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
         const user = userEvent.setup();
@@ -1102,6 +1106,56 @@ describe("save search", () => {
         await user.click(screen.getByRole("button", { name: "Save Search" }));
 
         expect(await screen.findByRole("button", { name: "Error" })).toBeInTheDocument();
+    });
+
+    it("includes target_location/search_radius_miles when a zip has been resolved", async () => {
+        const user = userEvent.setup();
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ lat: 37.3541, lng: -121.9552 }) }))
+        );
+        const fake = makeFakeSupabase({ authUser: LOGGED_IN_USER });
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await user.click(screen.getByRole("button", { name: /Location/ }));
+        await user.type(screen.getByLabelText("Zip Code"), "95050");
+        await user.selectOptions(screen.getByLabelText("Search Radius"), "50");
+        await user.click(screen.getByRole("button", { name: "Search" }));
+        await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+
+        await user.type(screen.getByPlaceholderText("Enter your email"), "buyer@example.com");
+        await user.click(screen.getByRole("button", { name: "Save Search" }));
+
+        await waitFor(() => expect(fake.savedSearchesTable.insert).toHaveBeenCalled());
+        const payload = fake.savedSearchesTable.insert.mock.calls[0][0];
+        expect(payload.target_location).toBe("SRID=4326;POINT(-121.9552 37.3541)");
+        expect(payload.search_radius_miles).toBe(50);
+    });
+
+    it("omits target_location/search_radius_miles entirely (not null) when no zip was resolved", async () => {
+        // Regression test for the edit-doesn't-wipe-existing-location
+        // behavior: Supabase's .update() only touches columns present in
+        // the payload, so omitting these keys (vs. sending null like
+        // every other filter) is what lets editing a saved search that
+        // already has a radius set -- without touching the Location
+        // filter this session -- leave it alone.
+        const user = userEvent.setup();
+        const fake = makeFakeSupabase({ authUser: LOGGED_IN_USER });
+        setFakeSupabase(fake);
+        render(<Home />);
+        await screen.findByText("2022 Toyota Camry");
+
+        await user.click(screen.getByLabelText("Make"));
+        await user.click(screen.getByRole("checkbox", { name: "Toyota" }));
+        await user.type(screen.getByPlaceholderText("Enter your email"), "buyer@example.com");
+        await user.click(screen.getByRole("button", { name: "Save Search" }));
+
+        await waitFor(() => expect(fake.savedSearchesTable.insert).toHaveBeenCalled());
+        const payload = fake.savedSearchesTable.insert.mock.calls[0][0];
+        expect("target_location" in payload).toBe(false);
+        expect("search_radius_miles" in payload).toBe(false);
     });
 });
 
