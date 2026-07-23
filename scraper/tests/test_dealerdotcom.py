@@ -29,6 +29,7 @@ JSON_LD_HTML = """
       "itemOffered": [
         {
           "url": "https://example.com/used/Subaru/2024-Subaru-Crosstrek-for-sale-fremont-ca-abc123.htm",
+          "name": "Used 2024 Subaru Crosstrek Premium",
           "vehicleIdentificationNumber": "JF2GUADC1RH257844",
           "brand": {"name": "Subaru"},
           "model": "Crosstrek",
@@ -82,7 +83,7 @@ def test_extract_vehicle_data_prefers_json_ld_over_card_text():
         "vin": "JF2GUADC1RH257844",
         "make": "Subaru",
         "model": "Crosstrek",
-        "trim": None,
+        "trim": "Premium",
         "model_year": 2024,
         "price": 24606.0,
         # Mileage always comes from the card, never the JSON-LD blob (its
@@ -111,6 +112,7 @@ def test_extract_vehicle_data_falls_back_to_card_text_with_no_json_ld_match():
     assert result["vin"] is None  # no VIN available anywhere on the card itself
     assert result["make"] == "Subaru"
     assert result["model"] == "Crosstrek Premium"  # no clean model/trim split without JSON-LD
+    assert result["trim"] is None
     assert result["model_year"] == 2024
     assert result["price"] == 24606.0  # still reads the card's own final-price
     assert result["mileage"] == 32373
@@ -138,6 +140,38 @@ def test_extract_vehicle_data_only_reads_the_final_price_not_the_admin_fee():
     result = extract_vehicle_data(card, "https://example.com")
     assert result is not None
     assert result["price"] == 18000.0
+
+
+def test_extract_vehicle_data_trim_falls_back_to_none_when_model_not_found_in_name():
+    # Defensive case: if a future template change makes `name` not
+    # actually contain `model` as a substring, trim extraction should
+    # degrade to None rather than raising or producing garbage.
+    json_ld_html = """
+    <script type="application/ld+json">
+    {"about": {"offers": {"itemOffered": [{
+        "url": "https://example.com/used/Subaru/x.htm",
+        "name": "Something unexpected entirely",
+        "brand": {"name": "Subaru"},
+        "model": "Crosstrek",
+        "vehicleModelDate": 2024,
+        "offers": {"price": "24606"}
+    }]}}}
+    </script>
+    """
+    card = _card(
+        """
+        <li class="vehicle-card vehicle-card-detailed">
+          <h2 class="vehicle-card-title"><a href="/used/Subaru/x.htm"><span>2024 Subaru Crosstrek</span></a></h2>
+        </li>
+        """
+    )
+    json_ld_offers = parse_json_ld_offers(json_ld_html)
+
+    result = extract_vehicle_data(card, "https://example.com", json_ld_offers)
+
+    assert result is not None
+    assert result["trim"] is None
+    assert result["model"] == "Crosstrek"
 
 
 def test_extract_vehicle_data_empty_card_falls_back_to_unknown():

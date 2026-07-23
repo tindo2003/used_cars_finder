@@ -55,6 +55,28 @@ def _is_comparable(listing: Listing, other: Listing) -> bool:
     return other_price is not None and other_price > 0
 
 
+def _is_comparable_same_trim(listing: Listing, other: Listing) -> bool:
+    """
+    A stricter tier on top of _is_comparable: also requires matching
+    trim (e.g. distinguishes a base F-150 from a Raptor, which
+    _is_comparable alone treats as the same "F-150"). Same None-vs-None
+    treatment as the seller_type check above -- two listings that both
+    lack a trim (overwhelmingly Craigslist, whose ads have no structured
+    trim field) still compare against each other; a listing with a real
+    trim never matches one with none, since we can't tell if they're
+    actually comparable.
+
+    Deliberately NOT used as the only comparable check -- see
+    compute_deal_score's tiered fallback and research/deal-scoring-heuristic.md
+    for why a hard trim-equality requirement guts coverage in practice
+    (trim strings are dealer-specific free text, not a clean taxonomy,
+    so exact matches are too rare to reliably clear DEAL_MIN_COMPARABLES).
+    """
+    if not _is_comparable(listing, other):
+        return False
+    return (other.trim or "").lower() == (listing.trim or "").lower()
+
+
 def _median(values: List[float]) -> float:
     values = sorted(values)
     n = len(values)
@@ -72,10 +94,25 @@ def compute_deal_score(listing: Listing, all_listings: List[Listing]) -> Optiona
     DEAL_MIN_COMPARABLES other active listings with the same make/model
     within DEAL_YEAR_WINDOW years and DEAL_MILEAGE_WINDOW miles to judge
     against -- not enough data to trust a median.
+
+    Tries the trim-matched pool first (_is_comparable_same_trim) for a
+    more accurate comparison when there's enough same-trim data to trust;
+    falls back to the trim-agnostic pool otherwise. This tiering, not a
+    hard trim requirement, is a deliberate choice verified against real
+    production data -- see research/deal-scoring-heuristic.md.
     """
     price = listing.price
     if price is None or price <= 0:
         return None
+
+    trim_matched_prices = [
+        float(other.price)
+        for other in all_listings
+        if _is_comparable_same_trim(listing, other) and other.price is not None
+    ]
+    if len(trim_matched_prices) >= DEAL_MIN_COMPARABLES:
+        median = _median(trim_matched_prices)
+        return (median - float(price)) / median if median else None
 
     comparable_prices = [
         float(other.price)

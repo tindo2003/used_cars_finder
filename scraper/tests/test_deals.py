@@ -100,6 +100,47 @@ def test_craigslist_listings_still_compare_against_each_other():
     assert score == 0.2
 
 
+def test_prefers_the_same_trim_pool_when_enough_data_exists():
+    # A base F-150 shouldn't be compared against a Raptor's price just
+    # because both are "F-150" -- when there are enough same-trim
+    # comparables, the median should come only from that pool.
+    listing = make_listing(price=56000, make="Ford", model="F-150", trim="Raptor")
+    same_trim = make_comparables([70000, 70000, 70000], make="Ford", model="F-150", trim="Raptor")
+    base_trim = [
+        make_listing(id=f"base-{i}", make="Ford", model="F-150", trim="XL", price=30000)
+        for i in range(5)
+    ]
+
+    score = compute_deal_score(listing, [listing] + same_trim + base_trim)
+
+    assert score == 0.2  # (70000 - 56000) / 70000, median from Raptors only, base trims ignored
+
+
+def test_falls_back_to_trim_agnostic_pool_when_same_trim_comparables_are_too_few():
+    # Only 2 same-trim comparables -- one short of DEAL_MIN_COMPARABLES --
+    # so this should fall back to today's trim-agnostic behavior rather
+    # than returning None outright.
+    listing = make_listing(price=8000, trim="XLE")
+    same_trim = make_comparables([9000, 9000], trim="XLE")  # too few on their own
+    other_trim = [make_listing(id=f"other-trim-{i}", price=10000, trim="LE") for i in range(3)]
+
+    score = compute_deal_score(listing, [listing] + same_trim + other_trim)
+
+    assert score == 0.2  # (10000 - 8000) / 10000, computed from the trim-agnostic pool
+
+
+def test_both_listings_missing_trim_still_compare():
+    # Craigslist (and any dealer listing missing trim) has no structured
+    # trim field -- None on both sides must still count as a match, same
+    # None-vs-None treatment the seller_type check already has.
+    listing = make_listing(price=8000, trim=None)
+    comparables = make_comparables([10000, 10000, 10000], trim=None)
+
+    score = compute_deal_score(listing, [listing] + comparables)
+
+    assert score == 0.2
+
+
 def test_excludes_listings_outside_the_year_window():
     listing = make_listing(price=8000, model_year=2020)
     # DEAL_YEAR_WINDOW is 2, so 2023 (3 years away) shouldn't count

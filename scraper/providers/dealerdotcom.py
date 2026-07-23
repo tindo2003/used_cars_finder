@@ -117,6 +117,19 @@ def extract_vehicle_data(
             price_str = offer.get("offers", {}).get("price")
             price = float(price_str) if price_str else 0.0
             photo_url = offer.get("image")
+
+            # The JSON-LD `name` reliably reads "{condition} {year} {make}
+            # {model} {trim}" (e.g. "Used 2024 Subaru Crosstrek Premium")
+            # -- confirmed live. Rather than parse the leading
+            # condition/year/make section (variable word count: "Used",
+            # "Certified Pre-Owned", etc.), find `model` as a substring
+            # and take everything after it, which is robust regardless.
+            trim = None
+            name = offer.get("name") or ""
+            if model and name:
+                idx = name.find(model)
+                if idx != -1:
+                    trim = name[idx + len(model):].strip() or None
         else:
             # Fallback: same free-text title parsing every other provider
             # in this codebase uses when no structured source is available.
@@ -130,6 +143,7 @@ def extract_vehicle_data(
             vin = None
             make = rest[0] if rest else None
             model = " ".join(rest[1:]) if len(rest) > 1 else None
+            trim = None  # no structured source available in the fallback path
             transmission = None
             fuel_type = None
             price = 0.0
@@ -162,7 +176,7 @@ def extract_vehicle_data(
             "vin": vin,
             "make": make or "Unknown",
             "model": model or "Unknown",
-            "trim": None,
+            "trim": trim,
             "model_year": model_year,
             "price": price,
             "mileage": mileage,
