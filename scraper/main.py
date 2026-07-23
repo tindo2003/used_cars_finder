@@ -4,7 +4,7 @@ import sys
 import time
 from typing import Optional
 
-from providers import craigslist, dealeron, dealerinspire, dealersocket_gemini
+from providers import craigslist, dealeron, dealerdotcom, dealerinspire, dealersocket_gemini
 from db import get_supabase, DbClient
 from models import SavedSearch
 from runner import ScrapeRunner
@@ -17,6 +17,8 @@ DEALERS = [
     {"url": "https://www.capitolford.com", "platform": "dealerinspire", "city": "San Jose", "name": "Capitol Ford"},
     {"url": "https://www.capitolchevysj.com", "platform": "dealerinspire", "city": "San Jose", "name": "Capitol Chevrolet"},
     {"url": "https://www.capitolhyundaisj.com", "platform": "dealerinspire", "city": "San Jose", "name": "Capitol Hyundai"},
+    {"url": "https://www.hondaofstevenscreek.com", "platform": "dealerdotcom", "city": "San Jose", "name": "Honda of Stevens Creek"},
+    {"url": "https://www.stevenscreekbmw.com", "platform": "dealerdotcom", "city": "San Jose", "name": "Stevens Creek BMW"},
     # Santa Clara
     {"url": "https://www.stevenscreekhyundai.com", "platform": "dealerinspire", "city": "Santa Clara", "name": "Stevens Creek Hyundai"},
     # Sunnyvale
@@ -30,12 +32,15 @@ DEALERS = [
     {"url": "https://www.acuraoffremont.com", "platform": "dealersocket-gemini", "city": "Fremont", "name": "Acura of Fremont"},
     {"url": "https://www.winnkiaoffremont.com", "platform": "dealersocket-gemini", "city": "Newark", "name": "Winn Kia of Fremont"},
     {"url": "https://www.winnvw.com", "platform": "dealersocket-gemini", "city": "Newark", "name": "Winn Volkswagen"},
+    {"url": "https://www.premiersubaruoffremont.com", "platform": "dealerdotcom", "city": "Fremont", "name": "Premier Subaru of Fremont"},
+    {"url": "https://www.fremontmazda.com", "platform": "dealerdotcom", "city": "Fremont", "name": "Fremont Mazda"},
 ]
 
 DEALER_SCRAPERS = {
     "dealeron": dealeron.scrape,
     "dealerinspire": dealerinspire.scrape,
     "dealersocket-gemini": dealersocket_gemini.scrape,
+    "dealerdotcom": dealerdotcom.scrape,
 }
 
 # eBay is intentionally excluded: its robots.txt explicitly disallows this
